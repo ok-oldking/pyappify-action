@@ -1,0 +1,21 @@
+// action.yml
+name: 'PyAppify Action'
+description: 'Use PyAppify to package your python app'
+author: 'ok-oldking'
+
+inputs:
+  version:
+    description: 'The tag version of pyappify to use. Defaults to the latest tag.'
+    required: false
+
+outputs:
+  dist-path:
+    description: 'The path to the directory containing the zipped application bundles.'
+
+runs:
+  using: 'node20'
+  main: 'index.js'
+
+branding:
+  icon: 'package'
+  color: 'blue'
