@@ -1,5 +1,4 @@
-
-import run_app from app
+from app import run_app
 
 if __name__ == "__main__":
-    run_app("Release") # Call the refactored function with "Release"
+    run_app("Release")
