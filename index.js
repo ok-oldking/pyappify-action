@@ -9,7 +9,7 @@ const archiver = require('archiver');
 async function run() {
     try {
         const pyappifyVersion = core.getInput('version');
-        const buildDir = 'build_pyappify';
+        const buildDir = 'pyappify_build';
 
         if (fs.existsSync(buildDir)) {
             fs.rmSync(buildDir, { recursive: true, force: true });
@@ -72,6 +72,11 @@ async function run() {
 
         core.startGroup('Packaging application profiles');
         const distDir = 'pyappify_dist';
+
+        if (fs.existsSync(distDir)) {
+            fs.rmSync(distDir, { recursive: true, force: true });
+        }
+
         const appDistDir = path.join(distDir, appName);
         fs.mkdirSync(appDistDir, { recursive: true });
 
@@ -88,12 +93,21 @@ async function run() {
             core.info(`Processing profile: ${profile.name}`);
             await exec.exec(`"${exeDestPath}"`, ['-c', 'setup', '-p', profile.name]);
 
+            const logDir = path.join(appDistDir, 'logs');
+            if (fs.existsSync(logDir)) {
+                fs.rmSync(logDir, { recursive: true, force: true });
+            }
+            const cacheDir = path.join(appDistDir, 'data', 'cache');
+            if (fs.existsSync(cacheDir)) {
+                fs.rmSync(cacheDir, { recursive: true, force: true });
+            }
+
             const zipFileName = `${appName}-${platform}-${profile.name}.zip`;
             const zipFilePath = path.join(distDir, zipFileName);
             const output = fs.createWriteStream(zipFilePath);
             const archive = archiver('zip');
             archive.pipe(output);
-            archive.directory(appDistDir, false);
+            archive.directory(appDistDir, appName);
             await archive.finalize();
             core.info(`Created zip archive: ${zipFilePath}`);
 
