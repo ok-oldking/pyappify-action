@@ -4,6 +4,7 @@
     "description": "pyappify action",
     "main": "index.js",
     "scripts": {
+        "build": "ncc build index.js --source-map --license licenses.txt",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "dependencies": {
@@ -14,5 +15,8 @@
         "archiver": "^7.0.1",
         "js-yaml": "^4.1.0",
         "pyappify": "link:"
+    },
+    "devDependencies": {
+        "@vercel/ncc": "^0.38.3"
     }
 }
