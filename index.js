@@ -14,11 +14,14 @@ const crypto = 'crypto';
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
     // --- MODIFICATION: Check if pnpm already exists ---
-    if (await io.which('pnpm', true)) {
-        core.info('pnpm is already installed. Skipping setup.');
+    let pnpmPath = await io.which('pnpm');
+
+    if (pnpmPath) {
+        core.info(`pnpm is already installed at: ${pnpmPath}. Skipping setup.`);
         core.endGroup();
         return;
     }
+
     await exec.exec('npm', ['install', '-g', 'pnpm']);
     core.info('pnpm has been installed.');
     core.endGroup();
