@@ -23,15 +23,17 @@ async function setupRust() {
     core.startGroup('Setting up Rust');
 
     if (process.platform === 'win32') {
-        // --- THIS IS THE CORRECTED BLOCK FOR WINDOWS ---
         core.info('Downloading rustup-init.exe for Windows');
-        let rustupInitPath = await tc.downloadTool('https://win.rustup.rs/x86_64');
+        // 1. Download the tool to a temporary path with a random name
+        const rustupInitPath = await tc.downloadTool('https://win.rustup.rs/x86_64');
 
-        // The downloaded file has no extension, so we need to rename it
-        const newPath = rustupInitPath + '.exe';
+        // 2. Define the new, correct path including the expected filename
+        const newPath = path.join(path.dirname(rustupInitPath), 'rustup-init.exe');
+
+        // 3. Rename the downloaded file to the name the installer expects
         await io.mv(rustupInitPath, newPath);
 
-        // Now execute the renamed file
+        // 4. Now execute the properly named file
         await exec.exec(newPath, ['-y', '--no-modify-path', '--default-toolchain', 'stable']);
     } else {
         // This block for Linux and macOS is already correct
@@ -40,17 +42,15 @@ async function setupRust() {
         await exec.exec('sh', [rustupInit, '-y', '--no-modify-path', '--default-toolchain', 'stable']);
     }
 
-    // Add cargo to the current session's PATH
+    // This part remains the same
     core.addPath(path.join(process.env.HOME || process.env.USERPROFILE, '.cargo', 'bin'));
 
-    // Install macOS cross-compilation targets if on a mac runner
     if (process.platform === 'darwin') {
         core.info('Installing macOS cross-compilation targets');
         await exec.exec('rustup', ['target', 'add', 'aarch64-apple-darwin']);
         await exec.exec('rustup', ['target', 'add', 'x86_64-apple-darwin']);
     }
 
-    // Install Linux dependencies if on a linux runner
     if (process.platform === 'linux') {
         core.info('Installing Linux dependencies');
         await exec.exec('sudo', ['apt-get', 'update']);
