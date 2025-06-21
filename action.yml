@@ -39,6 +39,10 @@ runs:
       with:
         version: 10.9.0
 
+    - name: Run PyAppify script
+      shell: bash
+      run: node ${{ github.action_path }}/index.js
+
 branding:
   icon: package
   color: blue
