@@ -12,9 +12,33 @@ outputs:
   dist-path:
     description: 'The path to the directory containing the zipped application bundles.'
 
+  pyappify-assets:
+    description: 'The list of files to be released.'
+
 runs:
-  using: 'node20'
-  main: 'index.js'
+  using: 'composite'
+  steps:
+    - name: setup node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '23.8.0'
+
+    - name: install Rust stable
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+    - name: install dependencies (ubuntu only)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: '10.9.0'
 
 branding:
   icon: 'package'

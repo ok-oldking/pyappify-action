@@ -126,9 +126,11 @@ async function run() {
             }
         }
         removeIfExists(appDistDir);
-        core.info(`deleting ${app_dir}`);
+        core.info(`deleting ${appDistDir}`);
         core.endGroup();
 
+        const releaseFiles = fs.readdirSync(distDir).map(f => path.join(distDir, f));
+        core.setOutput('pyappify-assets', releaseFiles.join('\n'));
         core.setOutput('dist-path', distDir);
     } catch (error) {
         core.setFailed(error.message);
