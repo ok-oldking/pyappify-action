@@ -1,19 +1,69 @@
 // index.js
 const core = require('@actions/core');
 const exec = require('@actions/exec');
+const tc = require('@actions/tool-cache'); // Tool-cache for downloading
+const io = require('@actions/io');       // IO utilities
 const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
-const archiver = require('archiver');
+const archiver = 'archiver';
 const crypto = require('crypto');
 
+// --- NEW SETUP FUNCTIONS ---
+
+async function setupPnpm() {
+    core.startGroup('Setting up pnpm');
+    // A simple global install is sufficient since Node.js is already provided.
+    await exec.exec('npm', ['install', '-g', 'pnpm']);
+    core.info('pnpm has been installed.');
+    core.endGroup();
+}
+
+async function setupRust() {
+    core.startGroup('Setting up Rust');
+    // Get the rustup-init script
+    if (process.platform === 'win32') {
+        // For Windows
+        const rustupInit = await tc.downloadTool('https://win.rustup.rs/x86_64');
+        await exec.exec(rustupInit, ['-y', '--no-modify-path', '--default-toolchain', 'stable']);
+    } else {
+        // For Linux and macOS
+        const rustupInit = await tc.downloadTool('https://sh.rustup.rs');
+        await exec.exec('sh', [rustupInit, '-y', '--no-modify-path', '--default-toolchain', 'stable']);
+    }
+
+    // Add cargo to the current session's PATH
+    core.addPath(path.join(process.env.HOME || process.env.USERPROFILE, '.cargo', 'bin'));
+
+    // Install macOS cross-compilation targets if on a mac runner
+    if (process.platform === 'darwin') {
+        core.info('Installing macOS cross-compilation targets');
+        await exec.exec('rustup', ['target', 'add', 'aarch64-apple-darwin']);
+        await exec.exec('rustup', ['target', 'add', 'x86_64-apple-darwin']);
+    }
+
+    // Install Linux dependencies if on a linux runner
+    if (process.platform === 'linux') {
+        core.info('Installing Linux dependencies');
+        await exec.exec('sudo', ['apt-get', 'update']);
+        await exec.exec('sudo', ['apt-get', 'install', '-y', 'libwebkit2gtk-4.0-dev', 'libwebkit2gtk-4.1-dev', 'libappindicator3-dev', 'librsvg2-dev', 'patchelf']);
+    }
+
+    core.info('Rust is set up.');
+    core.endGroup();
+}
+
+
+// --- YOUR EXISTING HELPER FUNCTIONS ---
+
 function removeIfExists(directoryPath) {
-    fs.rmSync(directoryPath, { recursive: true, force: true });
+    // Replaced with io.rmRF which is more robust
+    io.rmRF(directoryPath);
 }
 
 async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
     const output = fs.createWriteStream(zipFilePath);
-    const archive = archiver('zip');
+    const archive = require('archiver')('zip'); // Lazy require
     archive.pipe(output);
     archive.directory(sourceDir, rootDirName);
     await archive.finalize();
@@ -22,12 +72,17 @@ async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
 
 async function run() {
     try {
+        // --- CALL NEW SETUP FUNCTIONS AT THE START ---
+        await setupPnpm();
+        await setupRust();
+
         const pyappifyVersion = core.getInput('version');
         const buildDir = 'pyappify_build';
 
         removeIfExists(buildDir);
 
         core.startGroup('Cloning pyappify repository');
+        // ... (the rest of your script is identical to what you provided)
         await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
         if (pyappifyVersion) {
             core.info(`Checking out specified version: ${pyappifyVersion}`);
