@@ -72043,13 +72043,21 @@ async function setupPnpm() {
 
 async function setupRust() {
     core.startGroup('Setting up Rust');
-    // Get the rustup-init script
+
     if (process.platform === 'win32') {
-        // For Windows
-        const rustupInit = await tc.downloadTool('https://win.rustup.rs/x86_64');
-        await exec.exec(rustupInit, ['-y', '--no-modify-path', '--default-toolchain', 'stable']);
+        // --- THIS IS THE CORRECTED BLOCK FOR WINDOWS ---
+        core.info('Downloading rustup-init.exe for Windows');
+        let rustupInitPath = await tc.downloadTool('https://win.rustup.rs/x86_64');
+
+        // The downloaded file has no extension, so we need to rename it
+        const newPath = rustupInitPath + '.exe';
+        await io.mv(rustupInitPath, newPath);
+
+        // Now execute the renamed file
+        await exec.exec(newPath, ['-y', '--no-modify-path', '--default-toolchain', 'stable']);
     } else {
-        // For Linux and macOS
+        // This block for Linux and macOS is already correct
+        core.info('Downloading rustup.sh for Linux/macOS');
         const rustupInit = await tc.downloadTool('https://sh.rustup.rs');
         await exec.exec('sh', [rustupInit, '-y', '--no-modify-path', '--default-toolchain', 'stable']);
     }
