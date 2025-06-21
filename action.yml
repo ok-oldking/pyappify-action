@@ -5,7 +5,7 @@ author: 'ok-oldking'
 
 inputs:
   version:
-    description: 'The tag version of pyappify to use. Defaults to the latest tag.'
+    description: 'The tag version of pyappify to use. Defaults to the latest tag. Strongly recommended to set to ensure consistancy.'
     required: false
 
 outputs:

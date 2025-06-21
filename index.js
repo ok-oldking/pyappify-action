@@ -5,15 +5,27 @@ const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
 const archiver = require('archiver');
+const crypto = require('crypto');
+
+function removeIfExists(directoryPath) {
+    fs.rmSync(directoryPath, { recursive: true, force: true });
+}
+
+async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
+    const output = fs.createWriteStream(zipFilePath);
+    const archive = archiver('zip');
+    archive.pipe(output);
+    archive.directory(sourceDir, rootDirName);
+    await archive.finalize();
+    core.info(`Created zip archive: ${zipFilePath}`);
+}
 
 async function run() {
     try {
         const pyappifyVersion = core.getInput('version');
         const buildDir = 'pyappify_build';
 
-        if (fs.existsSync(buildDir)) {
-            fs.rmSync(buildDir, { recursive: true, force: true });
-        }
+        removeIfExists(buildDir);
 
         core.startGroup('Cloning pyappify repository');
         await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
@@ -72,10 +84,7 @@ async function run() {
 
         core.startGroup('Packaging application profiles');
         const distDir = 'pyappify_dist';
-
-        if (fs.existsSync(distDir)) {
-            fs.rmSync(distDir, { recursive: true, force: true });
-        }
+        removeIfExists(distDir);
 
         const appDistDir = path.join(distDir, appName);
         fs.mkdirSync(appDistDir, { recursive: true });
@@ -89,27 +98,26 @@ async function run() {
         fs.copyFileSync(exeSourcePath, exeDestPath);
         if (platform !== 'win32') fs.chmodSync(exeDestPath, '755');
 
+        const fileBuffer = fs.readFileSync(exeDestPath);
+        const hashSum = crypto.createHash('sha256');
+        hashSum.update(fileBuffer);
+        const hex = hashSum.digest('hex');
+        const hashFilePath = path.join(distDir, `${hex}.txt`);
+        fs.writeFileSync(hashFilePath, hex);
+        core.info(`Created SHA256 hash file: ${hashFilePath}`);
+
+        const baseZipFileName = `${appName}-${platform}.zip`;
+        await createZipArchive(appDistDir, path.join(distDir, baseZipFileName), appName);
+
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
             await exec.exec(`"${exeDestPath}"`, ['-c', 'setup', '-p', profile.name]);
 
-            const logDir = path.join(appDistDir, 'logs');
-            if (fs.existsSync(logDir)) {
-                fs.rmSync(logDir, { recursive: true, force: true });
-            }
-            const cacheDir = path.join(appDistDir, 'data', 'cache');
-            if (fs.existsSync(cacheDir)) {
-                fs.rmSync(cacheDir, { recursive: true, force: true });
-            }
+            removeIfExists(path.join(appDistDir, 'logs'));
+            removeIfExists(path.join(appDistDir, 'data', 'cache'));
 
             const zipFileName = `${appName}-${platform}-${profile.name}.zip`;
-            const zipFilePath = path.join(distDir, zipFileName);
-            const output = fs.createWriteStream(zipFilePath);
-            const archive = archiver('zip');
-            archive.pipe(output);
-            archive.directory(appDistDir, appName);
-            await archive.finalize();
-            core.info(`Created zip archive: ${zipFilePath}`);
+            await createZipArchive(appDistDir, path.join(distDir, zipFileName), appName);
 
             for (const file of fs.readdirSync(appDistDir)) {
                 if (file !== appBinaryName) {
@@ -117,6 +125,8 @@ async function run() {
                 }
             }
         }
+        removeIfExists(appDistDir);
+        core.info(`deleting ${app_dir}`);
         core.endGroup();
 
         core.setOutput('dist-path', distDir);
