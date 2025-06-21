@@ -1,19 +1,24 @@
 // index.js
 const core = require('@actions/core');
 const exec = require('@actions/exec');
-const tc = require('@actions/tool-cache'); // Tool-cache for downloading
-const io = require('@actions/io');       // IO utilities
+const tc = require('@actions/tool-cache');
+const io = require('@actions/io'); // Needed for the checks
 const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
 const archiver = 'archiver';
-const crypto = require('crypto');
+const crypto = 'crypto';
 
-// --- NEW SETUP FUNCTIONS ---
+// --- SETUP FUNCTIONS (NOW WITH CHECKS) ---
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
-    // A simple global install is sufficient since Node.js is already provided.
+    // --- MODIFICATION: Check if pnpm already exists ---
+    if (await io.which('pnpm', true)) {
+        core.info('pnpm is already installed. Skipping setup.');
+        core.endGroup();
+        return;
+    }
     await exec.exec('npm', ['install', '-g', 'pnpm']);
     core.info('pnpm has been installed.');
     core.endGroup();
@@ -21,28 +26,25 @@ async function setupPnpm() {
 
 async function setupRust() {
     core.startGroup('Setting up Rust');
+    // --- MODIFICATION: Check if cargo already exists ---
+    if (await io.which('cargo', true)) {
+        core.info('Rust (cargo) is already installed. Skipping setup.');
+        core.endGroup();
+        return;
+    }
 
     if (process.platform === 'win32') {
         core.info('Downloading rustup-init.exe for Windows');
-        // 1. Download the tool to a temporary path with a random name
         const rustupInitPath = await tc.downloadTool('https://win.rustup.rs/x86_64');
-
-        // 2. Define the new, correct path including the expected filename
         const newPath = path.join(path.dirname(rustupInitPath), 'rustup-init.exe');
-
-        // 3. Rename the downloaded file to the name the installer expects
         await io.mv(rustupInitPath, newPath);
-
-        // 4. Now execute the properly named file
         await exec.exec(newPath, ['-y', '--no-modify-path', '--default-toolchain', 'stable']);
     } else {
-        // This block for Linux and macOS is already correct
         core.info('Downloading rustup.sh for Linux/macOS');
         const rustupInit = await tc.downloadTool('https://sh.rustup.rs');
         await exec.exec('sh', [rustupInit, '-y', '--no-modify-path', '--default-toolchain', 'stable']);
     }
 
-    // This part remains the same
     core.addPath(path.join(process.env.HOME || process.env.USERPROFILE, '.cargo', 'bin'));
 
     if (process.platform === 'darwin') {
@@ -62,16 +64,14 @@ async function setupRust() {
 }
 
 
-// --- YOUR EXISTING HELPER FUNCTIONS ---
-
 function removeIfExists(directoryPath) {
-    // Replaced with io.rmRF which is more robust
+    core.info(`removing dir ${directoryPath}`)
     io.rmRF(directoryPath);
 }
 
 async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
     const output = fs.createWriteStream(zipFilePath);
-    const archive = require('archiver')('zip'); // Lazy require
+    const archive = require('archiver')('zip');
     archive.pipe(output);
     archive.directory(sourceDir, rootDirName);
     await archive.finalize();
@@ -80,7 +80,6 @@ async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
 
 async function run() {
     try {
-        // --- CALL NEW SETUP FUNCTIONS AT THE START ---
         await setupPnpm();
         await setupRust();
 
@@ -90,7 +89,6 @@ async function run() {
         removeIfExists(buildDir);
 
         core.startGroup('Cloning pyappify repository');
-        // ... (the rest of your script is identical to what you provided)
         await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
         if (pyappifyVersion) {
             core.info(`Checking out specified version: ${pyappifyVersion}`);
@@ -141,13 +139,13 @@ async function run() {
         core.endGroup();
 
         core.startGroup('Building application with Tauri');
+        const distDir = 'pyappify_dist';
+        removeIfExists(distDir);
         await exec.exec('pnpm', ['install'], { cwd: buildDir });
         await exec.exec('pnpm', ['run', 'tauri', 'build'], { cwd: buildDir });
         core.endGroup();
 
         core.startGroup('Packaging application profiles');
-        const distDir = 'pyappify_dist';
-        removeIfExists(distDir);
 
         const appDistDir = path.join(distDir, appName);
         fs.mkdirSync(appDistDir, { recursive: true });
@@ -162,7 +160,7 @@ async function run() {
         if (platform !== 'win32') fs.chmodSync(exeDestPath, '755');
 
         const fileBuffer = fs.readFileSync(exeDestPath);
-        const hashSum = crypto.createHash('sha256');
+        const hashSum = require('crypto').createHash('sha256');
         hashSum.update(fileBuffer);
         const hex = hashSum.digest('hex');
         const hashFilePath = path.join(distDir, `${hex}.txt`);
@@ -174,7 +172,13 @@ async function run() {
 
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
-            await exec.exec(`"${exeDestPath}"`, ['-c', 'setup', '-p', profile.name]);
+
+            // --- MODIFICATION: Removed manual quotes around the executable path ---
+            // The @actions/exec library handles quoting automatically.
+            removeIfExists(path.join(appDistDir, 'logs'));
+            removeIfExists(path.join(appDistDir, 'data', 'cache'));
+
+            await exec.exec(exeDestPath, ['-c', 'setup', '-p', profile.name]);
 
             removeIfExists(path.join(appDistDir, 'logs'));
             removeIfExists(path.join(appDistDir, 'data', 'cache'));
