@@ -15,7 +15,7 @@ outputs:
     description: The list of files to be released.
 
 runs:
-  using: 'node23'
+  using: 'node20'
   main: 'index.js'
 
 branding:
