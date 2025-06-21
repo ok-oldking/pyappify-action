@@ -40,6 +40,7 @@ runs:
         version: 10.9.0
 
     - name: Run PyAppify script
+      shell: ${{ runner.os == 'Windows' && 'pwsh' || 'bash' }}
       run: node ${{ github.action_path }}/index.js
 
 branding:
