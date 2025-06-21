@@ -1,27 +1,27 @@
 // action.yml
-name: 'PyAppify'
-description: 'Use PyAppify to package your python app'
-author: 'ok-oldking'
+name: PyAppify
+description: Use PyAppify to package your python app
+author: ok-oldking
 
 inputs:
   version:
-    description: 'The tag version of pyappify to use. Defaults to the latest tag. Strongly recommended to set to ensure consistancy.'
+    description: The tag version of pyappify to use. Defaults to the latest tag. Strongly recommended to set to ensure consistancy.
     required: false
 
 outputs:
   dist-path:
-    description: 'The path to the directory containing the zipped application bundles.'
+    description: The path to the directory containing the zipped application bundles.
 
   pyappify-assets:
-    description: 'The list of files to be released.'
+    description: The list of files to be released.
 
 runs:
-  using: 'composite'
+  using: composite
   steps:
     - name: setup node
       uses: actions/setup-node@v4
       with:
-        node-version: '23.8.0'
+        node-version: 23.8.0
 
     - name: install Rust stable
       uses: dtolnay/rust-toolchain@stable
@@ -38,8 +38,8 @@ runs:
     - name: Setup pnpm
       uses: pnpm/action-setup@v4
       with:
-        version: '10.9.0'
+        version: 10.9.0
 
 branding:
-  icon: 'package'
-  color: 'blue'
+  icon: package
+  color: blue
