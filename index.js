@@ -109,7 +109,11 @@ async function run() {
 
         fs.copyFileSync(configFile, path.join(buildDir, 'src-tauri', 'assets', configFile));
         if (fs.existsSync('icons')) {
-            fs.cpSync('icons', path.join(buildDir, 'src-tauri', 'icons'), { recursive: true });
+            targetPath = path.join(buildDir, 'src-tauri', 'icons')
+            core.info(`icons folder exists copy to ${targetPath}`);
+            fs.cpSync('icons', targetPath, { recursive: true });
+        } else {
+            core.info(`icons does not exist.`);
         }
 
         const tauriConfPath = path.join(buildDir, 'src-tauri', 'tauri.conf.json');
