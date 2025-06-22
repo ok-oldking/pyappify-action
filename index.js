@@ -239,8 +239,6 @@ async function run() {
             removeIfExists(tempNonUacDir);
             core.info(`Cleaned up temporary non-UAC directory: ${tempNonUacDir}`);
         }
-        removeIfExists(appDistDir);
-        core.info(`Deleting ${appDistDir}`);
         core.endGroup();
 
         const releaseFiles = fs.readdirSync(distDir).map(f => path.join(distDir, f));
@@ -248,7 +246,7 @@ async function run() {
         core.setOutput('pyappify-assets', releaseFiles.join('\n'));
         core.setOutput('dist-path', distDir);
         core.info(`pyappify-assets ${assets}`);
-        core.info(`pyappify-assets ${assets}`);
+        core.info(`dist-path ${assets}`);
     } catch (error) {
         core.setFailed(error.message);
     }
