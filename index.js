@@ -177,7 +177,9 @@ async function run() {
             removeIfExists(path.join(appDistDir, 'logs'));
             removeIfExists(path.join(appDistDir, 'data', 'cache'));
 
+            core.info(`start executing setup profile: ${profile.name}`);
             await exec.exec(exeDestPath, ['-c', 'setup', '-p', profile.name]);
+            core.info(`end executing setup profile: ${profile.name}`);
 
             removeIfExists(path.join(appDistDir, 'logs'));
             removeIfExists(path.join(appDistDir, 'data', 'cache'));
