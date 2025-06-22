@@ -167,6 +167,8 @@ async function run() {
         const baseZipFileName = `${appName}-${platform}.zip`;
         await createZipArchive(appDistDir, path.join(distDir, baseZipFileName), appName);
 
+        core.info(`read profiles ${config.profiles}`);
+
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
@@ -188,6 +190,7 @@ async function run() {
                     fs.rmSync(path.join(appDistDir, file), { recursive: true, force: true });
                 }
             }
+            core.info(`Done packaging profile ${profile.name}`);
         }
         removeIfExists(appDistDir);
         core.info(`deleting ${appDistDir}`);
