@@ -72024,26 +72024,21 @@ var __webpack_exports__ = {};
 const core = __nccwpck_require__(9999);
 const exec = __nccwpck_require__(8872);
 const tc = __nccwpck_require__(1631);
-const io = __nccwpck_require__(3357); // Needed for the checks
+const io = __nccwpck_require__(3357);
 const yaml = __nccwpck_require__(9885);
 const fs = __nccwpck_require__(9896);
 const path = __nccwpck_require__(6928);
-const archiver = 'archiver';
-const crypto = 'crypto';
-
-// --- SETUP FUNCTIONS (NOW WITH CHECKS) ---
+const archiver_module = 'archiver';
+const crypto_module = 'crypto';
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
-    // --- MODIFICATION: Check if pnpm already exists ---
     let pnpmPath = await io.which('pnpm');
-
     if (pnpmPath) {
         core.info(`pnpm is already installed at: ${pnpmPath}. Skipping setup.`);
         core.endGroup();
         return;
     }
-
     await exec.exec('npm', ['install', '-g', 'pnpm']);
     core.info('pnpm has been installed.');
     core.endGroup();
@@ -72051,13 +72046,11 @@ async function setupPnpm() {
 
 async function setupRust() {
     core.startGroup('Setting up Rust');
-    // --- MODIFICATION: Check if cargo already exists ---
     if (await io.which('cargo', true)) {
         core.info('Rust (cargo) is already installed. Skipping setup.');
         core.endGroup();
         return;
     }
-
     if (process.platform === 'win32') {
         core.info('Downloading rustup-init.exe for Windows');
         const rustupInitPath = await tc.downloadTool('https://win.rustup.rs/x86_64');
@@ -72069,29 +72062,26 @@ async function setupRust() {
         const rustupInit = await tc.downloadTool('https://sh.rustup.rs');
         await exec.exec('sh', [rustupInit, '-y', '--no-modify-path', '--default-toolchain', 'stable']);
     }
-
     core.addPath(path.join(process.env.HOME || process.env.USERPROFILE, '.cargo', 'bin'));
-
     if (process.platform === 'darwin') {
         core.info('Installing macOS cross-compilation targets');
         await exec.exec('rustup', ['target', 'add', 'aarch64-apple-darwin']);
         await exec.exec('rustup', ['target', 'add', 'x86_64-apple-darwin']);
     }
-
     if (process.platform === 'linux') {
         core.info('Installing Linux dependencies');
         await exec.exec('sudo', ['apt-get', 'update']);
         await exec.exec('sudo', ['apt-get', 'install', '-y', 'libwebkit2gtk-4.0-dev', 'libwebkit2gtk-4.1-dev', 'libappindicator3-dev', 'librsvg2-dev', 'patchelf']);
     }
-
     core.info('Rust is set up.');
     core.endGroup();
 }
 
-
 function removeIfExists(directoryPath) {
-    core.info(`removing dir ${directoryPath}`)
-    io.rmRF(directoryPath);
+    core.info(`Removing dir if exists: ${directoryPath}`);
+    if (fs.existsSync(directoryPath)) {
+        io.rmRF(directoryPath);
+    }
 }
 
 async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
@@ -72153,38 +72143,89 @@ async function run() {
         const cargoToml = fs.readFileSync(cargoTomlPath, 'utf8');
         const newCargoToml = cargoToml.replace(/name = "pyappify"/g, `name = "${appName}"`);
         fs.writeFileSync(cargoTomlPath, newCargoToml);
-
-        // if (config.uac === true) {
-        //     const buildRsPath = path.join(buildDir, 'src-tauri', 'build.rs');
-        //     const buildRs = fs.readFileSync(buildRsPath, 'utf8');
-        //     const newBuildRs = buildRs.replace('const UAC: bool = false;', 'const UAC: bool = true;');
-        //     fs.writeFileSync(buildRsPath, newBuildRs);
-        //     core.info('UAC set to true in build.rs');
-        // }
         core.endGroup();
 
-        core.startGroup('Building application with Tauri');
         const distDir = 'pyappify_dist';
         removeIfExists(distDir);
-        await exec.exec('pnpm', ['install'], { cwd: buildDir });
-        await exec.exec('pnpm', ['run', 'tauri', 'build'], { cwd: buildDir });
-        core.endGroup();
+        fs.mkdirSync(distDir, { recursive: true });
 
-        core.startGroup('Packaging application profiles');
-
-        const appDistDir = path.join(distDir, appName);
-        fs.mkdirSync(appDistDir, { recursive: true });
+        const buildRsPath = path.join(buildDir, 'src-tauri', 'build.rs');
+        const originalBuildRsContent = fs.readFileSync(buildRsPath, 'utf8');
+        const uacRequested = config.uac === true;
 
         const platform = process.platform;
         const exeSuffix = platform === 'win32' ? '.exe' : '';
         const appBinaryName = `${appName}${exeSuffix}`;
-        const exeSourcePath = path.join(buildDir, 'src-tauri', 'target', 'release', appBinaryName);
-        const exeDestPath = path.join(appDistDir, appBinaryName);
-        if (!fs.existsSync(exeSourcePath)) throw new Error(`Binary not found at ${exeSourcePath}`);
-        fs.copyFileSync(exeSourcePath, exeDestPath);
-        if (platform !== 'win32') fs.chmodSync(exeDestPath, '755');
+        const builtExePathInTarget = path.join(buildDir, 'src-tauri', 'target', 'release', appBinaryName);
 
-        const fileBuffer = fs.readFileSync(exeDestPath);
+        let exePathForSetupOperations;
+        let exePathForPackaging = builtExePathInTarget;
+
+        await exec.exec('pnpm', ['install'], { cwd: buildDir });
+
+        if (uacRequested) {
+            core.info('UAC mode: Building non-UAC version for setup, then UAC version for packaging.');
+
+            core.startGroup('Building non-UAC application (for setup)');
+            let nonUacBuildRs = originalBuildRsContent.replace('const UAC: bool = true;', 'const UAC: bool = false;');
+            if (!nonUacBuildRs.includes('const UAC: bool = false;')) { // If default template doesn't have it or 'true' wasn't there
+                // Assuming the template has `const UAC: bool = false;` or it's added/ensured here.
+                // For robustness, if the line is missing, this won't add it.
+                // The original code implies replacement, so the line should exist.
+                // If the line `const UAC: bool = false;` is crucial and might be missing, it needs explicit addition.
+                // Given structure, relying on replacement from template's `const UAC: bool = false;`
+            }
+            fs.writeFileSync(buildRsPath, nonUacBuildRs);
+            core.info('Ensured UAC is false in build.rs for non-UAC build.');
+            await exec.exec('pnpm', ['run', 'tauri', 'build'], { cwd: buildDir });
+            core.endGroup();
+
+            const tempNonUacDir = path.join(buildDir, 'src-tauri', 'target', 'release', 'non_uac_setup_exe');
+            removeIfExists(tempNonUacDir);
+            fs.mkdirSync(tempNonUacDir, { recursive: true });
+            exePathForSetupOperations = path.join(tempNonUacDir, appBinaryName);
+            fs.copyFileSync(builtExePathInTarget, exePathForSetupOperations);
+            if (platform !== 'win32') fs.chmodSync(exePathForSetupOperations, '755');
+            core.info(`Non-UAC executable for setup prepared at: ${exePathForSetupOperations}`);
+
+            core.startGroup('Building UAC-enabled application (for packaging)');
+            const uacBuildRs = originalBuildRsContent.replace('const UAC: bool = false;', 'const UAC: bool = true;');
+            if (!uacBuildRs.includes('const UAC: bool = true;')) throw new Error("Failed to set build.rs to UAC true. Check build.rs template.");
+            fs.writeFileSync(buildRsPath, uacBuildRs);
+            core.info('Set UAC to true in build.rs for UAC build.');
+            await exec.exec('pnpm', ['run', 'tauri', 'build'], { cwd: buildDir });
+            core.endGroup();
+
+            exePathForPackaging = builtExePathInTarget; // Now points to the UAC-enabled exe in target/release
+            fs.writeFileSync(buildRsPath, originalBuildRsContent); // Restore build.rs
+            core.info('Restored build.rs to original state.');
+
+        } else {
+            core.startGroup('Building application with Tauri (non-UAC)');
+            let nonUacBuildRs = originalBuildRsContent.replace('const UAC: bool = true;', 'const UAC: bool = false;');
+            fs.writeFileSync(buildRsPath, nonUacBuildRs);
+            core.info('Ensured UAC is false in build.rs (or default).');
+            await exec.exec('pnpm', ['run', 'tauri', 'build'], { cwd: buildDir });
+            core.endGroup();
+            exePathForPackaging = builtExePathInTarget;
+        }
+
+        core.startGroup('Packaging application profiles');
+        const appDistDir = path.join(distDir, appName);
+        fs.mkdirSync(appDistDir, { recursive: true });
+
+        const exeDestPathInAppDist = path.join(appDistDir, appBinaryName);
+        if (!fs.existsSync(exePathForPackaging)) throw new Error(`Binary for packaging not found at ${exePathForPackaging}`);
+        fs.copyFileSync(exePathForPackaging, exeDestPathInAppDist);
+        if (platform !== 'win32') fs.chmodSync(exeDestPathInAppDist, '755');
+
+        if (!uacRequested) {
+            exePathForSetupOperations = exeDestPathInAppDist;
+        }
+        if (!fs.existsSync(exePathForSetupOperations)) throw new Error(`Executable for setup operations not found at ${exePathForSetupOperations}`);
+
+
+        const fileBuffer = fs.readFileSync(exeDestPathInAppDist);
         const hashSum = (__nccwpck_require__(6982).createHash)('sha256');
         hashSum.update(fileBuffer);
         const hex = hashSum.digest('hex');
@@ -72197,13 +72238,10 @@ async function run() {
 
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
-
-            // --- MODIFICATION: Removed manual quotes around the executable path ---
-            // The @actions/exec library handles quoting automatically.
             removeIfExists(path.join(appDistDir, 'logs'));
             removeIfExists(path.join(appDistDir, 'data', 'cache'));
 
-            await exec.exec(exeDestPath, ['-c', 'setup', '-p', profile.name]);
+            await exec.exec(exePathForSetupOperations, ['-c', 'setup', '-p', profile.name]);
 
             removeIfExists(path.join(appDistDir, 'logs'));
             removeIfExists(path.join(appDistDir, 'data', 'cache'));
@@ -72217,13 +72255,22 @@ async function run() {
                 }
             }
         }
+
+        if (uacRequested && exePathForSetupOperations) {
+            const tempNonUacDir = path.dirname(exePathForSetupOperations);
+            removeIfExists(tempNonUacDir);
+            core.info(`Cleaned up temporary non-UAC directory: ${tempNonUacDir}`);
+        }
         removeIfExists(appDistDir);
-        core.info(`deleting ${appDistDir}`);
+        core.info(`Deleting ${appDistDir}`);
         core.endGroup();
 
         const releaseFiles = fs.readdirSync(distDir).map(f => path.join(distDir, f));
+        const assets = releaseFiles.join('\n')
         core.setOutput('pyappify-assets', releaseFiles.join('\n'));
         core.setOutput('dist-path', distDir);
+        core.info(`pyappify-assets ${assets}`);
+        core.info(`pyappify-assets ${assets}`);
     } catch (error) {
         core.setFailed(error.message);
     }
