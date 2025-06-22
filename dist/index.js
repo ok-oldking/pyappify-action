@@ -72154,13 +72154,13 @@ async function run() {
         const newCargoToml = cargoToml.replace(/name = "pyappify"/g, `name = "${appName}"`);
         fs.writeFileSync(cargoTomlPath, newCargoToml);
 
-        if (config.uac === true) {
-            const buildRsPath = path.join(buildDir, 'src-tauri', 'build.rs');
-            const buildRs = fs.readFileSync(buildRsPath, 'utf8');
-            const newBuildRs = buildRs.replace('const UAC: bool = false;', 'const UAC: bool = true;');
-            fs.writeFileSync(buildRsPath, newBuildRs);
-            core.info('UAC set to true in build.rs');
-        }
+        // if (config.uac === true) {
+        //     const buildRsPath = path.join(buildDir, 'src-tauri', 'build.rs');
+        //     const buildRs = fs.readFileSync(buildRsPath, 'utf8');
+        //     const newBuildRs = buildRs.replace('const UAC: bool = false;', 'const UAC: bool = true;');
+        //     fs.writeFileSync(buildRsPath, newBuildRs);
+        //     core.info('UAC set to true in build.rs');
+        // }
         core.endGroup();
 
         core.startGroup('Building application with Tauri');
