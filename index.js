@@ -6,7 +6,7 @@ const io = require('@actions/io');
 const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
-const archiver = require('archiver'); // Use a descriptive variable name
+const archiver = require('archiver');
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -54,33 +54,34 @@ async function setupRust() {
     core.endGroup();
 }
 
-function removeIfExists(directoryPath) {
-    core.info(`Removing dir if exists: ${directoryPath}`);
+async function removeIfExists(directoryPath) {
     if (fs.existsSync(directoryPath)) {
-        io.rmRF(directoryPath);
+        await io.rmRF(directoryPath);
+        core.info(`Removed dir if exists: ${directoryPath}`);
     }
 }
 
 async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
-    const output = fs.createWriteStream(zipFilePath);
-    const archive = archiver('zip', {
-        zlib: {
-            level: 9 // Maximum compression level (0-9, 9 is best)
-        }
+    return new Promise((resolve, reject) => {
+        const output = fs.createWriteStream(zipFilePath);
+        const archive = archiver('zip', {
+            zlib: { level: 9 }
+        });
+
+        output.on('close', () => {
+            core.info(`Created zip archive: ${zipFilePath}`);
+            core.info(`createZipArchive finalize end: ${zipFilePath} ${sourceDir} ${rootDirName}`);
+            resolve();
+        });
+
+        output.on('error', err => reject(err));
+        archive.on('error', err => reject(err));
+
+        archive.pipe(output);
+        archive.directory(sourceDir, rootDirName);
+        core.info(`createZipArchive finalize start: ${zipFilePath} ${sourceDir} ${rootDirName}`);
+        archive.finalize();
     });
-    output.on('close', () => {
-        core.info(`Created zip archive: ${zipFilePath}`);
-    });
-    output.on('error', err => {
-        core.error(`Error creating zip archive: ${err.message}`);
-    });
-    archive.on('error', err => {
-        core.error(`Archiver error: ${err.message}`);
-    });
-    archive.pipe(output);
-    archive.directory(sourceDir, rootDirName);
-    core.info(`createZipArchive finalize start: ${zipFilePath} ${sourceDir} ${rootDirName}`);
-    archive.finalize();
 }
 
 async function run() {
@@ -91,7 +92,7 @@ async function run() {
         const pyappifyVersion = core.getInput('version');
         const buildDir = 'pyappify_build';
 
-        removeIfExists(buildDir);
+        await removeIfExists(buildDir);
 
         core.startGroup('Cloning pyappify repository');
         await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
@@ -149,7 +150,7 @@ async function run() {
 
         core.startGroup('Building application with Tauri');
         const distDir = 'pyappify_dist';
-        removeIfExists(distDir);
+        await removeIfExists(distDir);
         await exec.exec('pnpm', ['install'], { cwd: buildDir });
         await exec.exec('pnpm', ['run', 'tauri', 'build'], { cwd: buildDir });
         core.endGroup();
@@ -184,15 +185,15 @@ async function run() {
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
-            removeIfExists(path.join(appDistDir, 'logs'));
-            removeIfExists(path.join(appDistDir, 'data', 'cache'));
+            await removeIfExists(path.join(appDistDir, 'logs'));
+            await removeIfExists(path.join(appDistDir, 'data', 'cache'));
 
             core.info(`start executing setup profile: ${profile.name}`);
             await exec.exec(exeDestPath, ['-c', 'setup', '-p', profile.name]);
             core.info(`end executing setup profile: ${profile.name}`);
 
-            removeIfExists(path.join(appDistDir, 'logs'));
-            removeIfExists(path.join(appDistDir, 'data', 'cache'));
+            await removeIfExists(path.join(appDistDir, 'logs'));
+            await removeIfExists(path.join(appDistDir, 'data', 'cache'));
 
             const zipFileName = `${appName}-${platform}-${profile.name}.zip`;
             await createZipArchive(appDistDir, path.join(distDir, zipFileName), appName);
@@ -207,7 +208,7 @@ async function run() {
             core.info(`Done packaging profile ${profile.name}`);
         }
 
-        removeIfExists(appDistDir);
+        await removeIfExists(appDistDir);
         core.info(`deleting ${appDistDir}`);
         core.endGroup();
 
@@ -223,4 +224,3 @@ async function run() {
 }
 
 run();
-// createZipArchive("pyappify_dist\\pyappify-sample", "pyappify_dist\\pyappify-sample-win32-release2.zip", "pyappify-sample");
