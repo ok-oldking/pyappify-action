@@ -6,8 +6,7 @@ const io = require('@actions/io');
 const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
-const archiver = 'archiver';
-const crypto = 'crypto';
+const archiver = require('archiver'); // Use a descriptive variable name
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -64,11 +63,24 @@ function removeIfExists(directoryPath) {
 
 async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
     const output = fs.createWriteStream(zipFilePath);
-    const archive = require('archiver')('zip');
+    const archive = archiver('zip', {
+        zlib: {
+            level: 9 // Maximum compression level (0-9, 9 is best)
+        }
+    });
+    output.on('close', () => {
+        core.info(`Created zip archive: ${zipFilePath}`);
+    });
+    output.on('error', err => {
+        core.error(`Error creating zip archive: ${err.message}`);
+    });
+    archive.on('error', err => {
+        core.error(`Archiver error: ${err.message}`);
+    });
     archive.pipe(output);
     archive.directory(sourceDir, rootDirName);
-    await archive.finalize();
-    core.info(`Created zip archive: ${zipFilePath}`);
+    core.info(`createZipArchive finalize start: ${zipFilePath} ${sourceDir} ${rootDirName}`);
+    archive.finalize();
 }
 
 async function run() {
@@ -160,7 +172,7 @@ async function run() {
         const hashSum = require('crypto').createHash('sha256');
         hashSum.update(fileBuffer);
         const hex = hashSum.digest('hex');
-        const hashFilePath = path.join(distDir, `${hex}.txt`);
+        const hashFilePath = path.join(distDir, `${platform}_sha256.txt`);
         fs.writeFileSync(hashFilePath, hex);
         core.info(`Created SHA256 hash file: ${hashFilePath}`);
 
@@ -172,8 +184,6 @@ async function run() {
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
-            // --- MODIFICATION: Removed manual quotes around the executable path ---
-            // The @actions/exec library handles quoting automatically.
             removeIfExists(path.join(appDistDir, 'logs'));
             removeIfExists(path.join(appDistDir, 'data', 'cache'));
 
@@ -186,14 +196,17 @@ async function run() {
 
             const zipFileName = `${appName}-${platform}-${profile.name}.zip`;
             await createZipArchive(appDistDir, path.join(distDir, zipFileName), appName);
+            core.info(`end createZipArchive: ${profile.name}`);
 
             for (const file of fs.readdirSync(appDistDir)) {
                 if (file !== appBinaryName) {
                     fs.rmSync(path.join(appDistDir, file), { recursive: true, force: true });
                 }
             }
+            core.info(`end clean appDistDir: ${appDistDir}`);
             core.info(`Done packaging profile ${profile.name}`);
         }
+
         removeIfExists(appDistDir);
         core.info(`deleting ${appDistDir}`);
         core.endGroup();
@@ -210,3 +223,4 @@ async function run() {
 }
 
 run();
+// createZipArchive("pyappify_dist\\pyappify-sample", "pyappify_dist\\pyappify-sample-win32-release2.zip", "pyappify-sample");
