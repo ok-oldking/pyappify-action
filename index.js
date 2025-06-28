@@ -109,6 +109,7 @@ async function run() {
             latestTag = latestTag.trim();
             if (!latestTag) throw new Error('Could not determine the latest tag.');
             core.info(`Latest tag found: ${latestTag}`);
+            pyappifyVersion = latestTag
             await exec.exec('git', ['checkout', latestTag], { cwd: buildDir });
         }
         core.endGroup();
@@ -131,7 +132,8 @@ async function run() {
 
         const tauriConfPath = path.join(buildDir, 'src-tauri', 'tauri.conf.json');
         const tauriConf = fs.readFileSync(tauriConfPath, 'utf8');
-        const newTauriConf = tauriConf.replace(/"pyappify"/g, JSON.stringify(appName));
+        let newTauriConf = tauriConf.replace(/"pyappify"/g, JSON.stringify(appName));
+        newTauriConf = newTauriConf.replace(/"0.0.1"/g, JSON.stringify(pyappifyVersion));
         fs.writeFileSync(tauriConfPath, newTauriConf);
 
         const cargoTomlPath = path.join(buildDir, 'src-tauri', 'Cargo.toml');
