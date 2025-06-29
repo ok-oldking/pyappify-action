@@ -133,7 +133,7 @@ async function run() {
         const tauriConfPath = path.join(buildDir, 'src-tauri', 'tauri.conf.json');
         const tauriConf = fs.readFileSync(tauriConfPath, 'utf8');
         let newTauriConf = tauriConf.replace(/"pyappify"/g, JSON.stringify(appName));
-        newTauriConf = newTauriConf.replace(/"0.0.1"/g, JSON.stringify(pyappifyVersion));
+        newTauriConf = newTauriConf.replace(/"0.0.1"/g, JSON.stringify(pyappifyVersion.replace(/^v/, '')));
         fs.writeFileSync(tauriConfPath, newTauriConf);
 
         const cargoTomlPath = path.join(buildDir, 'src-tauri', 'Cargo.toml');
