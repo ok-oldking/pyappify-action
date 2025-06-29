@@ -89,7 +89,7 @@ async function run() {
         await setupPnpm();
         await setupRust();
 
-        const pyappifyVersion = core.getInput('version');
+        let pyappifyVersion = core.getInput('version');
         const buildDir = 'pyappify_build';
 
         await removeIfExists(buildDir);
