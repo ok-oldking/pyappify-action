@@ -6,12 +6,13 @@ This GitHub Action uses [PyAppify](https://github.com/ok-oldking/pyappify) to co
 
 ## Prerequisites
 
-Before using this action, you must have a `pyappify.yml` configuration file in the root of your repository. You may also include an `icons` directory for custom application icons.
+Before using this action, you must have a `pyappify.yml` configuration file in the root of your repository. You may also include an optional `icons` directory for custom application icons.
 
-* icons(optional)/
+* pyappify.yml
+* icons
   * icon.ico
   * icon.png
-* pyappify.yml
+
 
 ### `pyappify.yml`
 
@@ -38,7 +39,7 @@ profiles:
 
 | Input     | Description                                                                                               | Default        | Required |
 |-----------|-----------------------------------------------------------------------------------------------------------|----------------|----------|
-| `version` | The tag version of pyappify to use (e.g., `v0.1.0`). It is highly recommended to pin a version for consistency. You can checkout the version at https://github.com/ok-oldking/pyappify/releases | `latest` tag | `false`  |
+| `version` | The tag version of pyappify to use (e.g., `v0.1.0`). It is highly recommended to pin a version for consistency. You can checkout the versions at https://github.com/ok-oldking/pyappify/releases | `latest` tag | `false`  |
 
 ## Usage Example
 
