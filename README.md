@@ -1,6 +1,6 @@
 # PyAppify Action
 
-[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-PyAppify%20Action-blue.svg?colorA=24292e&colorB=0366d6&style=flat&logo=github)](https://github.com/marketplace/actions/pyappify-action)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-PyAppify%20Action-blue.svg?colorA=24292e&colorB=0366d6&style=flat&logo=github)](https://github.com/marketplace/actions/pyappify)
 
 This GitHub Action uses [PyAppify](https://github.com/ok-oldking/pyappify) to compile and package your Python application into cross-platform, standalone executables directly within your workflow.
 
@@ -66,7 +66,7 @@ jobs:
       
       - name: Build with PyAppify Action
         id: build-app
-        uses: ok-oldking/pyappify-action
+        uses: pyappify
         with:
           version: 'v0.1.0' # Optional: Pin the PyAppify version, you can checkout the version at https://github.com/ok-oldking/pyappify/releases
 
