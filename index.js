@@ -187,15 +187,13 @@ async function run() {
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
-            await removeIfExists(path.join(appDistDir, 'logs'));
-            await removeIfExists(path.join(appDistDir, 'data', 'cache'));
-
             core.info(`start executing setup profile: ${profile.name}`);
             await exec.exec(exeDestPath, ['-c', 'setup', '-p', profile.name]);
             core.info(`end executing setup profile: ${profile.name}`);
 
             await removeIfExists(path.join(appDistDir, 'logs'));
             await removeIfExists(path.join(appDistDir, 'data', 'cache'));
+            await removeIfExists(path.join(appDistDir, 'cache'));
 
             const zipFileName = `${appName}-${platform}-${profile.name}.zip`;
             await createZipArchive(appDistDir, path.join(distDir, zipFileName), appName);
