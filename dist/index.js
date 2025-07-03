@@ -72029,6 +72029,7 @@ const yaml = __nccwpck_require__(4281);
 const fs = __nccwpck_require__(9896);
 const path = __nccwpck_require__(6928);
 const archiver = __nccwpck_require__(9392);
+const http = __nccwpck_require__(4844);
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -72108,78 +72109,15 @@ async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
 
 async function run() {
     try {
-        await setupPnpm();
-        await setupRust();
+        const useRelease = core.getInput('use_release');
+        const distDir = 'pyappify_dist';
+        await removeIfExists(distDir);
 
-        let pyappifyVersion = core.getInput('version');
-        const buildDir = 'pyappify_build';
-
-        await removeIfExists(buildDir);
-
-        core.startGroup('Cloning pyappify repository');
-        await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
-        if (pyappifyVersion) {
-            core.info(`Checking out specified version: ${pyappifyVersion}`);
-            await exec.exec('git', ['checkout', `tags/${pyappifyVersion}`], { cwd: buildDir });
-        } else {
-            core.info('Checking out the latest tag.');
-            let latestTag = '';
-            await exec.exec('git', ['describe', '--tags', '--abbrev=0'], {
-                cwd: buildDir,
-                listeners: { stdout: (data) => (latestTag += data.toString()) },
-            });
-            latestTag = latestTag.trim();
-            if (!latestTag) throw new Error('Could not determine the latest tag.');
-            core.info(`Latest tag found: ${latestTag}`);
-            pyappifyVersion = latestTag
-            await exec.exec('git', ['checkout', latestTag], { cwd: buildDir });
-        }
-        core.endGroup();
-
-        core.startGroup('Reading and preparing build');
         const configFile = 'pyappify.yml';
         if (!fs.existsSync(configFile)) throw new Error(`${configFile} not found.`);
         const config = yaml.load(fs.readFileSync(configFile, 'utf8'));
         const appName = config.name;
         if (!appName || !config.profiles) throw new Error(`'name' or 'profiles' not found in ${configFile}.`);
-
-        fs.copyFileSync(configFile, path.join(buildDir, 'src-tauri', 'assets', configFile));
-        if (fs.existsSync('icons')) {
-            targetPath = path.join(buildDir, 'src-tauri', 'icons')
-            core.info(`icons folder exists copy to ${targetPath}`);
-            fs.cpSync('icons', targetPath, { recursive: true });
-        } else {
-            core.info(`icons does not exist.`);
-        }
-
-        const tauriConfPath = path.join(buildDir, 'src-tauri', 'tauri.conf.json');
-        const tauriConf = fs.readFileSync(tauriConfPath, 'utf8');
-        let newTauriConf = tauriConf.replace(/"pyappify"/g, JSON.stringify(appName));
-        newTauriConf = newTauriConf.replace(/"0.0.1"/g, JSON.stringify(pyappifyVersion.replace(/^v/, '')));
-        fs.writeFileSync(tauriConfPath, newTauriConf);
-
-        const cargoTomlPath = path.join(buildDir, 'src-tauri', 'Cargo.toml');
-        const cargoToml = fs.readFileSync(cargoTomlPath, 'utf8');
-        const newCargoToml = cargoToml.replace(/name = "pyappify"/g, `name = "${appName}"`);
-        fs.writeFileSync(cargoTomlPath, newCargoToml);
-
-        if (config.uac === true) {
-            const buildRsPath = path.join(buildDir, 'src-tauri', 'build.rs');
-            const buildRs = fs.readFileSync(buildRsPath, 'utf8');
-            const newBuildRs = buildRs.replace('const UAC: bool = false;', 'const UAC: bool = true;');
-            fs.writeFileSync(buildRsPath, newBuildRs);
-            core.info('UAC set to true in build.rs');
-        }
-        core.endGroup();
-
-        core.startGroup('Building application with Tauri');
-        const distDir = 'pyappify_dist';
-        await removeIfExists(distDir);
-        await exec.exec('pnpm', ['install'], { cwd: buildDir });
-        await exec.exec('pnpm', ['run', 'tauri', 'build'], { cwd: buildDir });
-        core.endGroup();
-
-        core.startGroup('Packaging application profiles');
 
         const appDistDir = path.join(distDir, appName);
         fs.mkdirSync(appDistDir, { recursive: true });
@@ -72187,10 +72125,97 @@ async function run() {
         const platform = process.platform;
         const exeSuffix = platform === 'win32' ? '.exe' : '';
         const appBinaryName = `${appName}${exeSuffix}`;
-        const exeSourcePath = path.join(buildDir, 'src-tauri', 'target', 'release', appBinaryName);
         const exeDestPath = path.join(appDistDir, appBinaryName);
-        if (!fs.existsSync(exeSourcePath)) throw new Error(`Binary not found at ${exeSourcePath}`);
-        fs.copyFileSync(exeSourcePath, exeDestPath);
+
+        if (useRelease) {
+            core.startGroup('Downloading executable from release');
+            const client = new http.HttpClient('pyappify-action');
+            const releaseData = (await client.getJson(useRelease)).result;
+
+            if (!releaseData || !releaseData.assets) {
+                throw new Error(`Could not fetch release data or assets from ${useRelease}`);
+            }
+
+            const asset = releaseData.assets.find(a => a.name === appBinaryName);
+            if (!asset) {
+                throw new Error(`Could not find asset named '${appBinaryName}' for platform '${platform}' in release ${useRelease}`);
+            }
+
+            core.info(`Downloading asset: ${asset.name} from ${asset.browser_download_url}`);
+            const downloadedAssetPath = await tc.downloadTool(asset.browser_download_url);
+            await io.mv(downloadedAssetPath, exeDestPath);
+            core.info(`Executable downloaded to ${exeDestPath}`);
+            core.endGroup();
+        } else {
+            let pyappifyVersion = core.getInput('version');
+            const buildDir = 'pyappify_build';
+            await removeIfExists(buildDir);
+
+            core.startGroup('Cloning pyappify repository');
+            await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
+            if (pyappifyVersion) {
+                core.info(`Checking out specified version: ${pyappifyVersion}`);
+                await exec.exec('git', ['checkout', `tags/${pyappifyVersion}`], { cwd: buildDir });
+            } else {
+                core.info('Checking out the latest tag.');
+                let latestTag = '';
+                await exec.exec('git', ['describe', '--tags', '--abbrev=0'], {
+                    cwd: buildDir,
+                    listeners: { stdout: (data) => (latestTag += data.toString()) },
+                });
+                latestTag = latestTag.trim();
+                if (!latestTag) throw new Error('Could not determine the latest tag.');
+                core.info(`Latest tag found: ${latestTag}`);
+                pyappifyVersion = latestTag
+                await exec.exec('git', ['checkout', latestTag], { cwd: buildDir });
+            }
+            core.endGroup();
+
+            await setupPnpm();
+            await setupRust();
+
+            core.startGroup('Reading and preparing build');
+            fs.copyFileSync(configFile, path.join(buildDir, 'src-tauri', 'assets', configFile));
+            if (fs.existsSync('icons')) {
+                const targetPath = path.join(buildDir, 'src-tauri', 'icons')
+                core.info(`icons folder exists copy to ${targetPath}`);
+                fs.cpSync('icons', targetPath, { recursive: true });
+            } else {
+                core.info(`icons does not exist.`);
+            }
+
+            const tauriConfPath = path.join(buildDir, 'src-tauri', 'tauri.conf.json');
+            const tauriConf = fs.readFileSync(tauriConfPath, 'utf8');
+            let newTauriConf = tauriConf.replace(/"pyappify"/g, JSON.stringify(appName));
+            newTauriConf = newTauriConf.replace(/"0.0.1"/g, JSON.stringify(pyappifyVersion.replace(/^v/, '')));
+            fs.writeFileSync(tauriConfPath, newTauriConf);
+
+            const cargoTomlPath = path.join(buildDir, 'src-tauri', 'Cargo.toml');
+            const cargoToml = fs.readFileSync(cargoTomlPath, 'utf8');
+            const newCargoToml = cargoToml.replace(/name = "pyappify"/g, `name = "${appName}"`);
+            fs.writeFileSync(cargoTomlPath, newCargoToml);
+
+            if (config.uac === true) {
+                const buildRsPath = path.join(buildDir, 'src-tauri', 'build.rs');
+                const buildRs = fs.readFileSync(buildRsPath, 'utf8');
+                const newBuildRs = buildRs.replace('const UAC: bool = false;', 'const UAC: bool = true;');
+                fs.writeFileSync(buildRsPath, newBuildRs);
+                core.info('UAC set to true in build.rs');
+            }
+            core.endGroup();
+
+            core.startGroup('Building application with Tauri');
+            await exec.exec('pnpm', ['install'], { cwd: buildDir });
+            await exec.exec('pnpm', ['run', 'tauri', 'build'], { cwd: buildDir });
+            core.endGroup();
+
+            const exeSourcePath = path.join(buildDir, 'src-tauri', 'target', 'release', appBinaryName);
+            if (!fs.existsSync(exeSourcePath)) throw new Error(`Binary not found at ${exeSourcePath}`);
+            fs.copyFileSync(exeSourcePath, exeDestPath);
+        }
+
+        core.startGroup('Packaging application profiles');
+
         if (platform !== 'win32') fs.chmodSync(exeDestPath, '755');
 
         const fileBuffer = fs.readFileSync(exeDestPath);
