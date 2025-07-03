@@ -85,6 +85,47 @@ async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
     });
 }
 
+async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDestPath) {
+    core.startGroup('Downloading and extracting executable from release');
+    const client = new http.HttpClient('pyappify-action');
+    const releaseData = (await client.getJson(useReleaseUrl)).result;
+
+    if (!releaseData || !releaseData.assets) {
+        throw new Error(`Could not fetch release data or assets from ${useReleaseUrl}`);
+    }
+
+    const assetName = `${appName}-${platform}.zip`;
+    const asset = releaseData.assets.find(a => a.name === assetName);
+
+    if (!asset) {
+        throw new Error(`Could not find asset named '${assetName}' in release ${useReleaseUrl}`);
+    }
+
+    core.info(`Downloading asset: ${asset.name} from ${asset.browser_download_url}`);
+    const downloadedZipPath = await tc.downloadTool(asset.browser_download_url);
+
+    core.info(`Extracting ${asset.name}`);
+    const tempExtractDir = path.join(path.dirname(exeDestPath), 'temp_extract');
+    await io.mkdirP(tempExtractDir);
+    const extractedPath = await tc.extractZip(downloadedZipPath, tempExtractDir);
+
+    const exeSuffix = platform === 'win32' ? '.exe' : '';
+    const appBinaryName = `${appName}${exeSuffix}`;
+    const exeSourcePath = path.join(extractedPath, appName, appBinaryName);
+
+    if (!fs.existsSync(exeSourcePath)) {
+        throw new Error(`Executable not found at expected path after extraction: ${exeSourcePath}`);
+    }
+
+    core.info(`Moving executable from ${exeSourcePath} to ${exeDestPath}`);
+    await io.mkdirP(path.dirname(exeDestPath));
+    await io.mv(exeSourcePath, exeDestPath);
+    await io.rmRF(tempExtractDir);
+
+    core.info(`Executable successfully placed at ${exeDestPath}`);
+    core.endGroup();
+}
+
 async function run() {
     try {
         const useRelease = core.getInput('use_release');
@@ -106,24 +147,7 @@ async function run() {
         const exeDestPath = path.join(appDistDir, appBinaryName);
 
         if (useRelease) {
-            core.startGroup('Downloading executable from release');
-            const client = new http.HttpClient('pyappify-action');
-            const releaseData = (await client.getJson(useRelease)).result;
-
-            if (!releaseData || !releaseData.assets) {
-                throw new Error(`Could not fetch release data or assets from ${useRelease}`);
-            }
-
-            const asset = releaseData.assets.find(a => a.name === appBinaryName);
-            if (!asset) {
-                throw new Error(`Could not find asset named '${appBinaryName}' for platform '${platform}' in release ${useRelease}`);
-            }
-
-            core.info(`Downloading asset: ${asset.name} from ${asset.browser_download_url}`);
-            const downloadedAssetPath = await tc.downloadTool(asset.browser_download_url);
-            await io.mv(downloadedAssetPath, exeDestPath);
-            core.info(`Executable downloaded to ${exeDestPath}`);
-            core.endGroup();
+            await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath);
         } else {
             let pyappifyVersion = core.getInput('version');
             const buildDir = 'pyappify_build';
