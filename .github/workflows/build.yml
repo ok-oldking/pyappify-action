@@ -19,8 +19,9 @@ jobs:
       - name: Build with PyAppify Action
         id: build-app
         uses: ok-oldking/pyappify-action@master
-        # with:
+        with:
           # version: 'v0.1.0' # Optional: Pin the PyAppify version, you can checkout the version at https://github.com/ok-oldking/pyappify/releases
+          use_release: https://api.github.com/repos/ok-oldking/pyappify-action/releases/tags/v1.0.6
 
       - name: Release
         uses: softprops/action-gh-release@v2
