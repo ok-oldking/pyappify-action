@@ -66,7 +66,7 @@ jobs:
       
       - name: Build with PyAppify Action
         id: build-app
-        uses: pyappify
+        uses: ok-oldking/pyappify-action@master
         with:
           version: 'v0.1.0' # Optional: Pin the PyAppify version, you can checkout the version at https://github.com/ok-oldking/pyappify/releases
           use_release: 'https://api.github.com/repos/ok-oldking/pyappify-action/releases/tags/v1.0.0' # Optional: Use a existing release's assets to skip the building process, use when you didn't change the icons and the pyappify.yml
