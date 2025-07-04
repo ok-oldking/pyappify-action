@@ -23,6 +23,26 @@ jobs:
           # version: 'v0.1.0' # Optional: Pin the PyAppify version, you can checkout the version at https://github.com/ok-oldking/pyappify/releases
           use_release: https://api.github.com/repos/ok-oldking/pyappify-action/releases/tags/v1.0.6
 
+      - name: upload-unsigned-artifact
+        id: upload-unsigned-artifact1
+        uses: actions/upload-artifact@v4
+        with:
+          name: to-sign
+          path: |
+            pyappify_dist/*
+
+      - name: sign OK-EXE
+        uses: signpath/github-action-submit-signing-request@v1.1
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '639bc6dd-9623-43cd-ac75-50a445898012'
+          project-slug: 'ok-wuthering-waves'
+          signing-policy-slug: 'test-signing'
+          artifact-configuration-slug: "zip"
+          github-artifact-id: '${{ steps.upload-unsigned-artifact.outputs.artifact-id }}'
+          wait-for-completion: true
+          output-artifact-directory: 'pyappify_dist'
+
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
