@@ -6,6 +6,9 @@ on:
     tags:
       - 'v*'
 
+env:
+  SIGN_BUILD: 'true'
+
 jobs:
   build:
     strategy:
@@ -24,6 +27,7 @@ jobs:
           use_release: https://api.github.com/repos/ok-oldking/pyappify-action/releases/tags/v1.0.6
 
       - name: Extract EXE for signing
+        if: env.SIGN_BUILD == 'true'
         id: extract-exe
         shell: pwsh
         run: |
@@ -35,6 +39,7 @@ jobs:
           Remove-Item "temp_extract" -Recurse
 
       - name: Upload unsigned EXE artifact
+        if: env.SIGN_BUILD == 'true'
         id: upload-unsigned-artifact
         uses: actions/upload-artifact@v4
         with:
@@ -42,6 +47,7 @@ jobs:
           path: pyappify_dist/${{ steps.extract-exe.outputs.EXE_NAME }}
 
       - name: Sign EXE
+        if: env.SIGN_BUILD == 'true'
         uses: signpath/github-action-submit-signing-request@v1.1
         with:
           api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
@@ -54,6 +60,7 @@ jobs:
           output-artifact-directory: 'pyappify_dist'
 
       - name: Update archives with signed EXE
+        if: env.SIGN_BUILD == 'true'
         shell: pwsh
         run: |
           $signedExePath = "pyappify_dist/${{ steps.extract-exe.outputs.EXE_NAME }}"
@@ -64,8 +71,10 @@ jobs:
             Expand-Archive -Path $zipFile.FullName -DestinationPath $extractPath -Force
             $originalExe = Get-ChildItem -Path $extractPath -Filter *.exe -Recurse | Select-Object -First 1
             Copy-Item -Path $signedExePath -Destination $originalExe.FullName -Force
-            $contentToZip = Get-ChildItem -Path $extractPath | Select-Object -First 1
-            Compress-Archive -Path "$($contentToZip.FullName)\*" -DestinationPath $zipFile.FullName -Force
+            Push-Location $extractPath
+            $topLevelFolder = Get-ChildItem . | Select-Object -First 1
+            Compress-Archive -Path $topLevelFolder.Name -DestinationPath $zipFile.FullName -Force
+            Pop-Location
             Remove-Item $extractPath -Recurse -Force
           }
           Remove-Item $signedExePath
