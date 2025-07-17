@@ -72167,13 +72167,15 @@ async function run() {
         const exeSuffix = platform === 'win32' ? '.exe' : '';
         const appBinaryName = `${appName}${exeSuffix}`;
         const exeDestPath = path.join(appDistDir, appBinaryName);
+
         let pyappifyVersion = core.getInput('version');
-        const buildDir = 'pyappify_build';
+        let buildDir = 'pyappify_build';
+        await removeIfExists(buildDir);
 
         if (useRelease) {
             await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath);
         } else {
-            await removeIfExists(buildDir);
+
 
             core.startGroup('Cloning pyappify repository');
             await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
@@ -72255,6 +72257,20 @@ async function run() {
 
         core.info(`read profiles ${config.profiles}`);
 
+        core.startGroup('Creating online installer');
+        await removeIfExists(path.join(buildDir, 'src-tauri', 'data'));
+        await exec.exec('pnpm', ['tauri', 'bundle'], { cwd: buildDir });
+        const nsisDirOnline = path.join(buildDir, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
+        const onlineInstallerFile = fs.readdirSync(nsisDirOnline).find(f => f.endsWith('.exe'));
+        if (!onlineInstallerFile) {
+            throw new Error(`Could not find the generated NSIS installer for the online setup in ${nsisDirOnline}`);
+        }
+        const onlineInstallerName = `${appName}-${platform}-online-setup.exe`;
+        const onlineInstallerDest = path.join(distDir, onlineInstallerName);
+        await io.mv(path.join(nsisDirOnline, onlineInstallerFile), onlineInstallerDest);
+        core.info(`Created and moved online installer to ${onlineInstallerDest}`);
+        core.endGroup();
+
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
@@ -72265,8 +72281,8 @@ async function run() {
 
             const generatedDataPath = path.join(appDistDir, 'data');
             if (fs.existsSync(generatedDataPath)) {
-                await io.cp(generatedDataPath, tauriDataPath, { recursive: true });
-                core.info(`Copied data for profile ${profile.name} to ${tauriDataPath}`);
+                await io.mv(generatedDataPath, tauriDataPath);
+                core.info(`Moved data for profile ${profile.name} to ${tauriDataPath}`);
             }
 
             await exec.exec('pnpm', ['tauri', 'bundle'], { cwd: buildDir });
