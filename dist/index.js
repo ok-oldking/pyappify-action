@@ -72228,9 +72228,9 @@ async function run() {
             }
             core.endGroup();
 
-            core.startGroup('Building application with Tauri');
+            core.startGroup('Building application with Cargo');
             await exec.exec('pnpm', ['install'], { cwd: buildDir });
-            await exec.exec('pnpm', ['run', 'tauri', 'build'], { cwd: buildDir });
+            await exec.exec('cargo', ['build', '--release'], { cwd: path.join(buildDir, 'src-tauri') });
             core.endGroup();
 
             const exeSourcePath = path.join(buildDir, 'src-tauri', 'target', 'release', appBinaryName);
@@ -72258,24 +72258,37 @@ async function run() {
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
-            core.info(`start executing setup profile: ${profile.name}`);
             await exec.exec(exeDestPath, ['-c', 'setup', '-p', profile.name]);
-            core.info(`end executing setup profile: ${profile.name}`);
 
-            await removeIfExists(path.join(appDistDir, 'logs'));
-            await removeIfExists(path.join(appDistDir, 'data', 'cache'));
-            await removeIfExists(path.join(appDistDir, 'cache'));
+            const tauriDataPath = path.join(buildDir, 'src-tauri', 'data');
+            await removeIfExists(tauriDataPath);
 
-            const zipFileName = `${appName}-${platform}-${profile.name}.zip`;
-            await createZipArchive(appDistDir, path.join(distDir, zipFileName), appName);
-            core.info(`end createZipArchive: ${profile.name}`);
+            const generatedDataPath = path.join(appDistDir, 'data');
+            if (fs.existsSync(generatedDataPath)) {
+                await io.cp(generatedDataPath, tauriDataPath, { recursive: true });
+                core.info(`Copied data for profile ${profile.name} to ${tauriDataPath}`);
+            }
+
+            await exec.exec('pnpm', ['tauri', 'bundle'], { cwd: buildDir });
+
+            const nsisDir = path.join(buildDir, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
+            const files = fs.readdirSync(nsisDir);
+            const nsisInstallerFile = files.find(f => f.endsWith('.exe'));
+            if (!nsisInstallerFile) {
+                throw new Error(`Could not find the generated NSIS installer in ${nsisDir}`);
+            }
+            const sourceInstallerPath = path.join(nsisDir, nsisInstallerFile);
+
+            const newInstallerName = `${appName}-${platform}-${profile.name}-setup.exe`;
+            const destInstallerPath = path.join(distDir, newInstallerName);
+            await io.mv(sourceInstallerPath, destInstallerPath);
+            core.info(`Created and moved installer to ${destInstallerPath}`);
 
             for (const file of fs.readdirSync(appDistDir)) {
                 if (file !== appBinaryName) {
                     fs.rmSync(path.join(appDistDir, file), { recursive: true, force: true });
                 }
             }
-            core.info(`end clean appDistDir: ${appDistDir}`);
             core.info(`Done packaging profile ${profile.name}`);
         }
 
