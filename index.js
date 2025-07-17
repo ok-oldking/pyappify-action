@@ -210,7 +210,7 @@ async function run() {
 
             core.startGroup('Building application with Cargo');
             await exec.exec('pnpm', ['install'], { cwd: buildDir });
-            await exec.exec('cargo', ['build', '--release'], { cwd: path.join(buildDir, 'src-tauri') });
+            await exec.exec('pnpm', ['tauri', 'build'], { cwd: buildDir });
             core.endGroup();
 
             const exeSourcePath = path.join(buildDir, 'src-tauri', 'target', 'release', appBinaryName);
