@@ -236,7 +236,9 @@ async function run() {
         core.info(`read profiles ${config.profiles}`);
 
         core.startGroup('Creating online installer');
-        await removeIfExists(path.join(buildDir, 'src-tauri', 'data'));
+        const tauriDataPath = path.join(buildDir, 'src-tauri', 'data')
+        await removeIfExists(tauriDataPath);
+        await io.mkdirP(tauriDataPath);
         await exec.exec('pnpm', ['tauri', 'bundle'], { cwd: buildDir });
         const nsisDirOnline = path.join(buildDir, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
         const onlineInstallerFile = fs.readdirSync(nsisDirOnline).find(f => f.endsWith('.exe'));
@@ -254,7 +256,6 @@ async function run() {
 
             await exec.exec(exeDestPath, ['-c', 'setup', '-p', profile.name]);
 
-            const tauriDataPath = path.join(buildDir, 'src-tauri', 'data');
             await removeIfExists(tauriDataPath);
 
             const generatedDataPath = path.join(appDistDir, 'data');
