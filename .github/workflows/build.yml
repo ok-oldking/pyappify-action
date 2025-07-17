@@ -7,7 +7,7 @@ on:
       - 'v*'
 
 env:
-  SIGN_BUILD: 'true'
+  SIGN_BUILD: 'false'
 
 jobs:
   build:
@@ -23,8 +23,6 @@ jobs:
       - name: Build with PyAppify Action
         id: build-app
         uses: ok-oldking/pyappify-action@master
-        with:
-          use_release: https://api.github.com/repos/ok-oldking/pyappify-action/releases/tags/v1.0.6
 
       - name: Extract EXE for signing
         if: env.SIGN_BUILD == 'true'
@@ -85,4 +83,4 @@ jobs:
         with:
           body: |
             Your Release Note
-          files: pyappify_dist/*.zip
+          files: pyappify_dist/*
