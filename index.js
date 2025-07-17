@@ -145,12 +145,12 @@ async function run() {
         const exeSuffix = platform === 'win32' ? '.exe' : '';
         const appBinaryName = `${appName}${exeSuffix}`;
         const exeDestPath = path.join(appDistDir, appBinaryName);
+        let pyappifyVersion = core.getInput('version');
+        const buildDir = 'pyappify_build';
 
         if (useRelease) {
             await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath);
         } else {
-            let pyappifyVersion = core.getInput('version');
-            const buildDir = 'pyappify_build';
             await removeIfExists(buildDir);
 
             core.startGroup('Cloning pyappify repository');
