@@ -72152,6 +72152,7 @@ async function run() {
     try {
         const useRelease = core.getInput('use_release');
         const buildExeOnly = core.getBooleanInput('build_exe_only');
+        let buildDir = 'pyappify_build';
         core.info(`start running buildExeOnly:${buildExeOnly} useRelease:${useRelease}`);
 
         if (useRelease && buildExeOnly) {
@@ -72177,7 +72178,7 @@ async function run() {
         const exeSourcePath = path.join(buildDir, 'src-tauri', 'target', 'release', appBinaryName);
 
         let pyappifyVersion = core.getInput('version');
-        let buildDir = 'pyappify_build';
+
 
         if (useRelease) {
             await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath);
