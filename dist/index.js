@@ -72151,6 +72151,13 @@ async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDe
 async function run() {
     try {
         const useRelease = core.getInput('use_release');
+        const buildExeOnly = core.getBooleanInput('build_exe_only');
+        core.info(`start running buildExeOnly:${buildExeOnly} useRelease:${useRelease}`);
+
+        if (useRelease && buildExeOnly) {
+            throw new Error('use_release and build_exe_only cannot be used at the same time.');
+        }
+
         const distDir = 'pyappify_dist';
         await removeIfExists(distDir);
 
@@ -72167,16 +72174,14 @@ async function run() {
         const exeSuffix = platform === 'win32' ? '.exe' : '';
         const appBinaryName = `${appName}${exeSuffix}`;
         const exeDestPath = path.join(appDistDir, appBinaryName);
+        const exeSourcePath = path.join(buildDir, 'src-tauri', 'target', 'release', appBinaryName);
 
         let pyappifyVersion = core.getInput('version');
         let buildDir = 'pyappify_build';
-        await removeIfExists(buildDir);
 
         if (useRelease) {
             await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath);
-        } else {
-
-
+        } else if (!fs.existsSync(exeSourcePath)) {
             core.startGroup('Cloning pyappify repository');
             await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
             if (pyappifyVersion) {
@@ -72235,7 +72240,17 @@ async function run() {
             await exec.exec('pnpm', ['tauri', 'build'], { cwd: buildDir });
             core.endGroup();
 
-            const exeSourcePath = path.join(buildDir, 'src-tauri', 'target', 'release', appBinaryName);
+            if (buildExeOnly) {
+                if (!fs.existsSync(exeSourcePath)) {
+                    throw new Error(`Binary not found at ${exeSourcePath} after build attempt.`);
+                }
+                const exeSourceFolder = path.dirname(exeSourcePath);
+                core.setOutput('exe-path', exeSourcePath);
+                core.setOutput('exe-folder', exeSourceFolder);
+                core.info(`build_exe_only is true. Action finished. Exe path: ${exeSourcePath}`);
+                return;
+            }
+
             if (!fs.existsSync(exeSourcePath)) throw new Error(`Binary not found at ${exeSourcePath}`);
             fs.copyFileSync(exeSourcePath, exeDestPath);
         }
