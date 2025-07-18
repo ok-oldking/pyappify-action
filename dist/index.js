@@ -72251,12 +72251,12 @@ async function run() {
                 core.info(`build_exe_only is true. Action finished. Exe path: ${exeSourcePath}`);
                 return;
             }
-
-            if (!fs.existsSync(exeSourcePath)) throw new Error(`Binary not found at ${exeSourcePath}`);
-            fs.copyFileSync(exeSourcePath, exeDestPath);
         }
 
         core.startGroup('Packaging application profiles');
+
+        if (!fs.existsSync(exeSourcePath)) throw new Error(`Binary not found at ${exeSourcePath}`);
+        fs.copyFileSync(exeSourcePath, exeDestPath);
 
         if (platform !== 'win32') fs.chmodSync(exeDestPath, '755');
 
