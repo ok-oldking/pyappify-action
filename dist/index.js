@@ -72141,6 +72141,7 @@ async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDe
 
     core.info(`Moving executable from ${exeSourcePath} to ${exeDestPath}`);
     await io.mkdirP(path.dirname(exeDestPath));
+    await io.mkdirP(path.dirname(targetReleasePath));
     await io.cp(exeSourcePath, targetReleasePath)
     await io.mv(exeSourcePath, exeDestPath);
     await io.rmRF(tempExtractDir);
