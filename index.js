@@ -160,9 +160,7 @@ async function run() {
         let pyappifyVersion = core.getInput('version');
 
 
-        if (useRelease) {
-            await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath, exeSourcePath);
-        } else if (!fs.existsSync(exeSourcePath)) {
+        if (!fs.existsSync(exeSourcePath)) {
             core.startGroup('Cloning pyappify repository');
             await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
             if (pyappifyVersion) {
@@ -215,21 +213,24 @@ async function run() {
                 core.info('UAC set to true in build.rs');
             }
             core.endGroup();
-
             core.startGroup('Building application with Cargo');
             await exec.exec('pnpm', ['install'], { cwd: buildDir });
-            await exec.exec('pnpm', ['tauri', 'build'], { cwd: buildDir });
-            core.endGroup();
-
-            if (buildExeOnly) {
-                if (!fs.existsSync(exeSourcePath)) {
-                    throw new Error(`Binary not found at ${exeSourcePath} after build attempt.`);
+            if (useRelease) {
+                await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath, exeSourcePath);
+                core.endGroup();
+            } else {
+                await exec.exec('pnpm', ['tauri', 'build'], { cwd: buildDir });
+                core.endGroup();
+                if (buildExeOnly) {
+                    if (!fs.existsSync(exeSourcePath)) {
+                        throw new Error(`Binary not found at ${exeSourcePath} after build attempt.`);
+                    }
+                    const exeSourceFolder = path.dirname(exeSourcePath);
+                    core.setOutput('exe-path', exeSourcePath);
+                    core.setOutput('exe-folder', exeSourceFolder);
+                    core.info(`build_exe_only is true. Action finished. Exe path: ${exeSourcePath}`);
+                    return;
                 }
-                const exeSourceFolder = path.dirname(exeSourcePath);
-                core.setOutput('exe-path', exeSourcePath);
-                core.setOutput('exe-folder', exeSourceFolder);
-                core.info(`build_exe_only is true. Action finished. Exe path: ${exeSourcePath}`);
-                return;
             }
         }
 
