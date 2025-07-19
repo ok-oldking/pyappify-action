@@ -72107,7 +72107,7 @@ async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
     });
 }
 
-async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDestPath) {
+async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDestPath, targetReleasePath) {
     core.startGroup('Downloading and extracting executable from release');
     const client = new http.HttpClient('pyappify-action');
     const releaseData = (await client.getJson(useReleaseUrl)).result;
@@ -72141,6 +72141,7 @@ async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDe
 
     core.info(`Moving executable from ${exeSourcePath} to ${exeDestPath}`);
     await io.mkdirP(path.dirname(exeDestPath));
+    await io.cp(exeSourcePath, targetReleasePath)
     await io.mv(exeSourcePath, exeDestPath);
     await io.rmRF(tempExtractDir);
 
@@ -72181,7 +72182,7 @@ async function run() {
 
 
         if (useRelease) {
-            await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath);
+            await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath, exeSourcePath);
         } else if (!fs.existsSync(exeSourcePath)) {
             core.startGroup('Cloning pyappify repository');
             await exec.exec('git', ['clone', 'https://github.com/ok-oldking/pyappify.git', buildDir]);
