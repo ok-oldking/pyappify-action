@@ -72109,8 +72109,10 @@ async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
 
 async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDestPath, targetReleasePath) {
     core.startGroup('Downloading and extracting executable from release');
+    const token = process.env.GITHUB_TOKEN;
+    const headers = token ? { authorization: `token ${token}` } : undefined;
     const client = new http.HttpClient('pyappify-action');
-    const releaseData = (await client.getJson(useReleaseUrl)).result;
+    const releaseData = (await client.getJson(useReleaseUrl, headers)).result;
 
     if (!releaseData || !releaseData.assets) {
         throw new Error(`Could not fetch release data or assets from ${useReleaseUrl}`);
@@ -72124,7 +72126,7 @@ async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDe
     }
 
     core.info(`Downloading asset: ${asset.name} from ${asset.browser_download_url}`);
-    const downloadedZipPath = await tc.downloadTool(asset.browser_download_url);
+    const downloadedZipPath = await tc.downloadTool(asset.browser_download_url, undefined, token ? `token ${token}` : undefined);
 
     core.info(`Extracting ${asset.name}`);
     const tempExtractDir = path.join(path.dirname(exeDestPath), 'temp_extract');
@@ -72344,6 +72346,7 @@ async function run() {
 }
 
 run();
+
 module.exports = __webpack_exports__;
 /******/ })()
 ;
