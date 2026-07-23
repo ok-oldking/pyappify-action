@@ -72171,8 +72171,13 @@ async function run() {
     try {
         const useRelease = core.getInput('use_release');
         const buildExeOnly = core.getBooleanInput('build_exe_only');
-        let buildDir = 'pyappify_build';
-        core.info(`start running buildExeOnly:${buildExeOnly} useRelease:${useRelease}`);
+        // Keep the Tauri/NSIS build tree out of the deeply nested GitHub
+        // workspace. NSIS still encounters the legacy Windows MAX_PATH limit
+        // when packaging dependencies that contain long paths (for example,
+        // PySide6 QML build artifacts).
+        const buildRoot = process.env.RUNNER_TEMP || process.cwd();
+        const buildDir = path.join(buildRoot, 'pab');
+        core.info(`start running buildExeOnly:${buildExeOnly} useRelease:${useRelease} buildDir:${buildDir}`);
 
         if (useRelease && buildExeOnly) {
             throw new Error('use_release and build_exe_only cannot be used at the same time.');
