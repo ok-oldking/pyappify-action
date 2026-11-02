@@ -17,6 +17,12 @@ inputs:
     type: boolean
     default: false
 
+  add_version_name:
+    description: if enabled, will add the app version (the pushed git tag, leading v removed) to the setup exe names, e.g. xxx-setup-1.1.0.exe or xxx-setup-1.1.0-beta.1.exe
+    required: false
+    type: boolean
+    default: false
+
 outputs:
   dist-path:
     description: The path to the directory containing the zipped application bundles.

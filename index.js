@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const archiver = require('archiver');
 const http = require('@actions/http-client');
-const { getMainBinaryName, prepareTauriConfig } = require('./build-config');
+const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require('./build-config');
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -146,10 +146,25 @@ async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDe
     core.endGroup();
 }
 
+async function getAppVersion() {
+    if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME) {
+        return process.env.GITHUB_REF_NAME;
+    }
+    let latestTag = '';
+    await exec.exec('git', ['describe', '--tags', '--abbrev=0'], {
+        ignoreReturnCode: true,
+        listeners: { stdout: (data) => (latestTag += data.toString()) },
+    });
+    latestTag = latestTag.trim();
+    if (!latestTag) throw new Error('add_version_name is enabled but no git tag was found for the app version.');
+    return latestTag;
+}
+
 async function run() {
     try {
         const useRelease = core.getInput('use_release');
         const buildExeOnly = core.getBooleanInput('build_exe_only');
+        const addVersionName = core.getBooleanInput('add_version_name');
         const buildDir = process.env.RUNNER_TEMP
             ? path.join(process.env.RUNNER_TEMP, 'p')
             : 'p';
@@ -273,6 +288,9 @@ async function run() {
         fs.writeFileSync(hashFilePath, hex);
         core.info(`Created SHA256 hash file: ${hashFilePath}`);
 
+        const appVersion = addVersionName ? await getAppVersion() : '';
+        if (appVersion) core.info(`Adding version ${appVersion} to installer names`);
+
         const baseZipFileName = `${appName}-${platform}.zip`;
         await createZipArchive(appDistDir, path.join(distDir, baseZipFileName), appName);
 
@@ -288,7 +306,7 @@ async function run() {
         if (!onlineInstallerFile) {
             throw new Error(`Could not find the generated NSIS installer for the online setup in ${nsisDirOnline}`);
         }
-        const onlineInstallerName = `${appName}-${platform}-online-setup.exe`;
+        const onlineInstallerName = getInstallerFileName(`${appName}-${platform}-online-setup`, appVersion);
         const onlineInstallerDest = path.join(distDir, onlineInstallerName);
         await io.mv(path.join(nsisDirOnline, onlineInstallerFile), onlineInstallerDest);
         core.info(`Created and moved online installer to ${onlineInstallerDest}`);
@@ -317,7 +335,7 @@ async function run() {
             }
             const sourceInstallerPath = path.join(nsisDir, nsisInstallerFile);
 
-            const newInstallerName = `${appName}-${platform}-${profile.name}-setup.exe`;
+            const newInstallerName = getInstallerFileName(`${appName}-${platform}-${profile.name}-setup`, appVersion);
             const destInstallerPath = path.join(distDir, newInstallerName);
             await io.mv(sourceInstallerPath, destInstallerPath);
             core.info(`Created and moved installer to ${destInstallerPath}`);

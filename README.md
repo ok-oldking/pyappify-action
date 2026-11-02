@@ -40,6 +40,9 @@ profiles:
 | Input     | Description                                                                                               | Default        | Required |
 |-----------|-----------------------------------------------------------------------------------------------------------|----------------|----------|
 | `version` | The tag version of pyappify to use (e.g., `v0.1.0`). It is highly recommended to pin a version for consistency. You can checkout the versions at https://github.com/ok-oldking/pyappify/releases | `latest` tag | `false`  |
+| `use_release` | A GitHub release API url whose assets are reused to skip building the exe. | | `false` |
+| `build_exe_only` | Only build the exe and output `exe-path` so it can be signed before running the action again. | `false` | `false` |
+| `add_version_name` | Add the app version (the pushed git tag, leading `v` removed) to the setup exe names, e.g. `xxx-setup-1.1.0.exe` or `xxx-setup-1.1.0-beta.1.exe`. | `false` | `false` |
 
 ## Usage Example
 

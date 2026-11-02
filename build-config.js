@@ -32,7 +32,15 @@ function prepareTauriConfig(contents, appName, version) {
     return `${JSON.stringify(config, null, 2)}\n`;
 }
 
+function getInstallerFileName(baseName, version) {
+    if (!version) {
+        return `${baseName}.exe`;
+    }
+    return `${baseName}-${version.replace(/^v/, '')}.exe`;
+}
+
 module.exports = {
+    getInstallerFileName,
     getMainBinaryName,
     prepareTauriConfig,
 };
