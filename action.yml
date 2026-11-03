@@ -3,6 +3,10 @@ description: Use PyAppify to package your python app
 author: ok-oldking
 
 inputs:
+  app_version:
+    description: Exact application tag to prepare before installing dependencies. Defaults to the workflow tag on tag builds, or latest stable otherwise. Requires PyAppify v1.2.4 or newer.
+    required: false
+
   version:
     description: The tag version of pyappify to use. Defaults to the latest tag. Strongly recommended to set to ensure consistancy.
     required: false

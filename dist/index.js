@@ -61898,6 +61898,38 @@ ZipStream.prototype.finalize = function() {
 
 /***/ }),
 
+/***/ 453:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const fs = __nccwpck_require__(9896);
+const path = __nccwpck_require__(6928);
+
+function getSetupVersion(input, env = process.env) {
+    return input || (env.GITHUB_REF_TYPE === 'tag' ? env.GITHUB_REF_NAME : '') || '';
+}
+
+async function setupProfile(exec, executable, profile, appName, appDistDir, version) {
+    const args = ['-c', 'setup', '-p', profile];
+    if (version) args.push('--setup-version', version);
+    await exec(executable, args);
+
+    if (version) {
+        const configPath = path.join(appDistDir, 'data', 'apps', appName, 'app.json');
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (!config.installed || config.current_version !== version) {
+            throw new Error(
+                `Setup for ${profile} requested ${version} but prepared ${config.current_version}. ` +
+                'Use PyAppify v1.2.4 or newer, including when reusing a release executable.',
+            );
+        }
+    }
+}
+
+module.exports = { getSetupVersion, setupProfile };
+
+
+/***/ }),
+
 /***/ 2613:
 /***/ ((module) => {
 
@@ -72084,6 +72116,7 @@ const path = __nccwpck_require__(6928);
 const archiver = __nccwpck_require__(9392);
 const http = __nccwpck_require__(4844);
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = __nccwpck_require__(7299);
+const { getSetupVersion, setupProfile } = __nccwpck_require__(453);
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -72240,6 +72273,7 @@ async function run() {
         const useRelease = core.getInput('use_release');
         const buildExeOnly = core.getBooleanInput('build_exe_only');
         const addVersionName = core.getBooleanInput('add_version_name');
+        const setupVersion = getSetupVersion(core.getInput('app_version'));
         const buildDir = process.env.RUNNER_TEMP
             ? path.join(process.env.RUNNER_TEMP, 'p')
             : 'p';
@@ -72363,7 +72397,7 @@ async function run() {
         fs.writeFileSync(hashFilePath, hex);
         core.info(`Created SHA256 hash file: ${hashFilePath}`);
 
-        const appVersion = addVersionName ? await getAppVersion() : '';
+        const appVersion = addVersionName ? (setupVersion || await getAppVersion()) : '';
         if (appVersion) core.info(`Adding version ${appVersion} to installer names`);
 
         const baseZipFileName = `${appName}-${platform}.zip`;
@@ -72390,7 +72424,7 @@ async function run() {
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
-            await exec.exec(exeDestPath, ['-c', 'setup', '-p', profile.name]);
+            await setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion);
 
             await removeIfExists(tauriDataPath);
 

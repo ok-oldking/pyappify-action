@@ -39,6 +39,7 @@ profiles:
 
 | Input     | Description                                                                                               | Default        | Required |
 |-----------|-----------------------------------------------------------------------------------------------------------|----------------|----------|
+| `app_version` | Exact application tag to package, including prereleases. Requires PyAppify v1.2.4 or newer. | Workflow tag on tag builds; latest stable otherwise | `false` |
 | `version` | The tag version of pyappify to use (e.g., `v0.1.0`). It is highly recommended to pin a version for consistency. You can checkout the versions at https://github.com/ok-oldking/pyappify/releases | `latest` tag | `false`  |
 | `use_release` | A GitHub release API url whose assets are reused to skip building the exe. | | `false` |
 | `build_exe_only` | Only build the exe and output `exe-path` so it can be signed before running the action again. | `false` | `false` |
@@ -84,6 +85,13 @@ jobs:
 ```
 
 ## How It Works
+
+Tag-triggered builds prepare that exact application tag before installing Python
+dependencies. Branch or manual builds can set `app_version` explicitly; without
+it they retain the launcher's latest stable default. The action checks the
+prepared `app.json` before bundling and fails if its version differs. Update any
+pinned PyAppify `version` to v1.2.4 or newer. Executables supplied through
+`use_release` must also support `--setup-version`; older launchers fail the check.
 
 The action automates the following steps:
 1.  Clones the PyAppify repository.

@@ -9,6 +9,7 @@ const path = require('path');
 const archiver = require('archiver');
 const http = require('@actions/http-client');
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require('./build-config');
+const { getSetupVersion, setupProfile } = require('./setup-profile');
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -165,6 +166,7 @@ async function run() {
         const useRelease = core.getInput('use_release');
         const buildExeOnly = core.getBooleanInput('build_exe_only');
         const addVersionName = core.getBooleanInput('add_version_name');
+        const setupVersion = getSetupVersion(core.getInput('app_version'));
         const buildDir = process.env.RUNNER_TEMP
             ? path.join(process.env.RUNNER_TEMP, 'p')
             : 'p';
@@ -288,7 +290,7 @@ async function run() {
         fs.writeFileSync(hashFilePath, hex);
         core.info(`Created SHA256 hash file: ${hashFilePath}`);
 
-        const appVersion = addVersionName ? await getAppVersion() : '';
+        const appVersion = addVersionName ? (setupVersion || await getAppVersion()) : '';
         if (appVersion) core.info(`Adding version ${appVersion} to installer names`);
 
         const baseZipFileName = `${appName}-${platform}.zip`;
@@ -315,7 +317,7 @@ async function run() {
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
-            await exec.exec(exeDestPath, ['-c', 'setup', '-p', profile.name]);
+            await setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion);
 
             await removeIfExists(tauriDataPath);
 
