@@ -343,6 +343,8 @@ async function run() {
                     scriptRelPath: resolveMainScript(generatedDataPath, appName, mainScript),
                     pythonPath: getProfileValue(config.profiles, profile, 'python_path'),
                     appVersion: readPreparedAppVersion(generatedDataPath, appName),
+                    admin: getProfileValue(config.profiles, profile, 'admin') === true,
+                    usePythonw: getProfileValue(config.profiles, profile, 'use_pythonw') === true,
                 });
                 const zipPackagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion));
                 await createZipPackage(archiver, generatedDataPath, cmdContent, zipPackagePath, appName);

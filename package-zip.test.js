@@ -40,4 +40,19 @@ test('run cmd uses bundled python for .py scripts', () => {
     assert.match(cmd, /"%~dp0data\\apps\\app\\python\\python\.exe" "%~dp0data\\apps\\app\\working\\main\.py" %\*/);
     assert.match(cmd, /set "PYAPPIFY_APP_VERSION=v1\.0\.0"/);
     assert.ok(!cmd.includes('PYTHONPATH=') || cmd.includes('set "PYTHONPATH="'));
+    assert.ok(!cmd.includes('fltmc'));
+    assert.ok(!cmd.includes('start ""'));
+});
+
+test('run cmd self-elevates for admin and detaches with pythonw', () => {
+    const cmd = buildRunCmd({
+        appName: 'app',
+        profileName: 'release',
+        scriptRelPath: 'data\\apps\\app\\working\\main.py',
+        admin: true,
+        usePythonw: true,
+    });
+    assert.ok(cmd.indexOf('fltmc') < cmd.indexOf('cd /d'));
+    assert.match(cmd, /-Verb RunAs -WindowStyle Hidden/);
+    assert.match(cmd, /start "" "%~dp0data\\apps\\app\\python\\pythonw\.exe" "%~dp0data\\apps\\app\\working\\main\.py" %\*/);
 });

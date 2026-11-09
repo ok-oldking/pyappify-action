@@ -40,17 +40,33 @@ function resolveMainScript(dataDir, appName, mainScript) {
     throw new Error(`Main script '${mainScript}' not found in ${path.join(appBase, 'working')} or ${path.join(appBase, 'python', 'Scripts')}`);
 }
 
-function buildRunCmd({ appName, profileName, scriptRelPath, pythonPath, appVersion }) {
+function buildRunCmd({ appName, profileName, scriptRelPath, pythonPath, appVersion, admin = false, usePythonw = false }) {
     const appBase = `%~dp0data\\apps\\${appName}`;
     const isPy = scriptRelPath.toLowerCase().endsWith('.py');
     const target = `"%~dp0${scriptRelPath}"`;
-    const command = isPy ? `"${appBase}\\python\\python.exe" ${target} %*` : `${target} %*`;
+    const pythonExe = `"${appBase}\\python\\${usePythonw ? 'pythonw.exe' : 'python.exe'}"`;
+    const invocation = isPy ? `${pythonExe} ${target} %*` : `${target} %*`;
+    // pythonw: detach with start so the console closes immediately; otherwise run in this console.
+    const command = usePythonw ? `start "" ${invocation}` : invocation;
     const lines = [
         '@echo off',
         'chcp 65001 >nul',
         'setlocal',
-        ...PYTHON_ENVS_TO_CLEAR.map(name => `set "${name}="`),
     ];
+    if (admin) {
+        // Relaunch elevated via UAC when not already admin. Paths/args go through env vars to avoid quoting issues.
+        const windowStyle = usePythonw ? ' -WindowStyle Hidden' : '';
+        lines.push(
+            'fltmc >nul 2>&1',
+            'if errorlevel 1 (',
+            '    set "PYAPPIFY_SELF=%~f0"',
+            '    set "PYAPPIFY_ARGS=%*"',
+            `    powershell -NoProfile -WindowStyle Hidden -Command "$a=$env:PYAPPIFY_ARGS; if ($a) { Start-Process -FilePath $env:PYAPPIFY_SELF -Verb RunAs${windowStyle} -ArgumentList $a } else { Start-Process -FilePath $env:PYAPPIFY_SELF -Verb RunAs${windowStyle} }"`,
+            '    exit /b',
+            ')',
+        );
+    }
+    lines.push(...PYTHON_ENVS_TO_CLEAR.map(name => `set "${name}="`));
     if (pythonPath) lines.push(`set "PYTHONPATH=${pythonPath}"`);
     if (appVersion) {
         lines.push(`set "PYAPPIFY_APP_VERSION=${appVersion}"`);
@@ -65,7 +81,7 @@ function buildRunCmd({ appName, profileName, scriptRelPath, pythonPath, appVersi
         'set "PYTHONNOUSERSITE=1"',
         `cd /d "${appBase}\\working"`,
         command,
-        'exit /b %ERRORLEVEL%',
+        usePythonw ? 'exit /b 0' : 'exit /b %ERRORLEVEL%',
     );
     return lines.join('\r\n') + '\r\n';
 }
