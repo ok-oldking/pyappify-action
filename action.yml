@@ -27,6 +27,12 @@ inputs:
     type: boolean
     default: false
 
+  package_zip:
+    description: if enabled, will also create a zip package per profile (root folder is the app name) containing the prepared python env and app, without the tauri exe or installer, plus a <app name>.cmd that runs the python script directly
+    required: false
+    type: boolean
+    default: false
+
 outputs:
   dist-path:
     description: The path to the directory containing the zipped application bundles.

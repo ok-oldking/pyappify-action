@@ -10,6 +10,14 @@ const archiver = require('archiver');
 const http = require('@actions/http-client');
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require('./build-config');
 const { getSetupVersion, setupProfile } = require('./setup-profile');
+const {
+    buildRunCmd,
+    createZipPackage,
+    getProfileValue,
+    getZipPackageFileName,
+    readPreparedAppVersion,
+    resolveMainScript,
+} = require('./package-zip');
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -166,6 +174,7 @@ async function run() {
         const useRelease = core.getInput('use_release');
         const buildExeOnly = core.getBooleanInput('build_exe_only');
         const addVersionName = core.getBooleanInput('add_version_name');
+        const packageZip = core.getBooleanInput('package_zip');
         const setupVersion = getSetupVersion(core.getInput('app_version'));
         const buildDir = process.env.RUNNER_TEMP
             ? path.join(process.env.RUNNER_TEMP, 'p')
@@ -322,6 +331,23 @@ async function run() {
             await removeIfExists(tauriDataPath);
 
             const generatedDataPath = path.join(appDistDir, 'data');
+            if (packageZip) {
+                if (!fs.existsSync(generatedDataPath)) {
+                    throw new Error(`package_zip is enabled but no data was generated at ${generatedDataPath}`);
+                }
+                const mainScript = getProfileValue(config.profiles, profile, 'main_script');
+                if (!mainScript) throw new Error(`main_script not set for profile ${profile.name}`);
+                const cmdContent = buildRunCmd({
+                    appName,
+                    profileName: profile.name,
+                    scriptRelPath: resolveMainScript(generatedDataPath, appName, mainScript),
+                    pythonPath: getProfileValue(config.profiles, profile, 'python_path'),
+                    appVersion: readPreparedAppVersion(generatedDataPath, appName),
+                });
+                const zipPackagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion));
+                await createZipPackage(archiver, generatedDataPath, cmdContent, zipPackagePath, appName);
+                core.info(`Created zip package ${zipPackagePath}`);
+            }
             if (fs.existsSync(generatedDataPath)) {
                 await io.mv(generatedDataPath, tauriDataPath);
                 core.info(`Moved data for profile ${profile.name} to ${tauriDataPath}`);

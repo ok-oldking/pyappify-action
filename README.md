@@ -44,6 +44,7 @@ profiles:
 | `use_release` | A GitHub release API url whose assets are reused to skip building the exe. | | `false` |
 | `build_exe_only` | Only build the exe and output `exe-path` so it can be signed before running the action again. | `false` | `false` |
 | `add_version_name` | Add the app version (the pushed git tag, leading `v` removed) to the setup exe names, e.g. `xxx-setup-1.1.0.exe` or `xxx-setup-1.1.0-beta.1.exe`. | `false` | `false` |
+| `package_zip` | Also create a portable zip per profile, `<name>-<platform>-<profile>.zip` (version appended when `add_version_name` is on). Its root folder is the app name and holds the prepared `data` folder (Python env + app) and a `<name>.cmd` that runs the main script with the bundled Python. No Tauri exe, no installer. | `false` | `false` |
 
 ## Usage Example
 

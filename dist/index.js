@@ -61898,6 +61898,117 @@ ZipStream.prototype.finalize = function() {
 
 /***/ }),
 
+/***/ 4250:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const fs = __nccwpck_require__(9896);
+const path = __nccwpck_require__(6928);
+
+const PYTHON_ENVS_TO_CLEAR = [
+    'PYTHONHOME',
+    'PYTHONPATH',
+    'PYTHONSTARTUP',
+    'PYTHONUSERBASE',
+    'PYTHONEXECUTABLE',
+    'VIRTUAL_ENV',
+    'CONDA_PREFIX',
+    'CONDA_DEFAULT_ENV',
+];
+
+function getProfileValue(profiles, profile, key) {
+    if (profile[key] !== undefined && profile[key] !== null && profile[key] !== '') return profile[key];
+    const first = profiles[0] || {};
+    return first[key];
+}
+
+function getZipPackageFileName(appName, platform, profileName, version) {
+    const base = `${appName}-${platform}-${profileName}`;
+    return version ? `${base}-${version.replace(/^v/, '')}.zip` : `${base}.zip`;
+}
+
+// Mirrors pyappify's find_script_or_executable: working dir first, then python/Scripts (with extensions).
+// Returns a path relative to the package root (the folder containing the .cmd), using backslashes.
+function resolveMainScript(dataDir, appName, mainScript) {
+    const appBase = path.join(dataDir, 'apps', appName);
+    const candidates = [
+        ['working', mainScript],
+        ['python', 'Scripts', mainScript],
+        ...['.exe', '.bat', '.cmd', '.ps1', ''].map(ext => ['python', 'Scripts', `${mainScript}${ext}`]),
+    ];
+    for (const parts of candidates) {
+        if (fs.existsSync(path.join(appBase, ...parts)) && fs.statSync(path.join(appBase, ...parts)).isFile()) {
+            return ['data', 'apps', appName, ...parts].join('\\').replace(/\//g, '\\');
+        }
+    }
+    throw new Error(`Main script '${mainScript}' not found in ${path.join(appBase, 'working')} or ${path.join(appBase, 'python', 'Scripts')}`);
+}
+
+function buildRunCmd({ appName, profileName, scriptRelPath, pythonPath, appVersion }) {
+    const appBase = `%~dp0data\\apps\\${appName}`;
+    const isPy = scriptRelPath.toLowerCase().endsWith('.py');
+    const target = `"%~dp0${scriptRelPath}"`;
+    const command = isPy ? `"${appBase}\\python\\python.exe" ${target} %*` : `${target} %*`;
+    const lines = [
+        '@echo off',
+        'chcp 65001 >nul',
+        'setlocal',
+        ...PYTHON_ENVS_TO_CLEAR.map(name => `set "${name}="`),
+    ];
+    if (pythonPath) lines.push(`set "PYTHONPATH=${pythonPath}"`);
+    if (appVersion) {
+        lines.push(`set "PYAPPIFY_APP_VERSION=${appVersion}"`);
+        lines.push(`set "PYAPPIFY_APP_STARTING_VERSION=${appVersion}"`);
+    }
+    lines.push(
+        `set "PYAPPIFY_APP_PROFILE=${profileName}"`,
+        `set "PYAPPIFY_APP_JSON_PATH=${appBase}\\app.json"`,
+        'set "PYAPPIFY_UPGRADEABLE=0"',
+        'set "PYTHONIOENCODING=utf-8"',
+        'set "PYTHONUNBUFFERED=1"',
+        'set "PYTHONNOUSERSITE=1"',
+        `cd /d "${appBase}\\working"`,
+        command,
+        'exit /b %ERRORLEVEL%',
+    );
+    return lines.join('\r\n') + '\r\n';
+}
+
+function readPreparedAppVersion(dataDir, appName) {
+    const appJsonPath = path.join(dataDir, 'apps', appName, 'app.json');
+    if (!fs.existsSync(appJsonPath)) return '';
+    try {
+        return JSON.parse(fs.readFileSync(appJsonPath, 'utf8')).current_version || '';
+    } catch {
+        return '';
+    }
+}
+
+function createZipPackage(archiver, dataDir, cmdContent, zipFilePath, appName) {
+    return new Promise((resolve, reject) => {
+        const output = fs.createWriteStream(zipFilePath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        output.on('close', resolve);
+        output.on('error', reject);
+        archive.on('error', reject);
+        archive.pipe(output);
+        archive.directory(dataDir, `${appName}/data`);
+        archive.append(cmdContent, { name: `${appName}/${appName}.cmd` });
+        archive.finalize();
+    });
+}
+
+module.exports = {
+    buildRunCmd,
+    createZipPackage,
+    getProfileValue,
+    getZipPackageFileName,
+    readPreparedAppVersion,
+    resolveMainScript,
+};
+
+
+/***/ }),
+
 /***/ 453:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -72117,6 +72228,14 @@ const archiver = __nccwpck_require__(9392);
 const http = __nccwpck_require__(4844);
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = __nccwpck_require__(7299);
 const { getSetupVersion, setupProfile } = __nccwpck_require__(453);
+const {
+    buildRunCmd,
+    createZipPackage,
+    getProfileValue,
+    getZipPackageFileName,
+    readPreparedAppVersion,
+    resolveMainScript,
+} = __nccwpck_require__(4250);
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -72273,6 +72392,7 @@ async function run() {
         const useRelease = core.getInput('use_release');
         const buildExeOnly = core.getBooleanInput('build_exe_only');
         const addVersionName = core.getBooleanInput('add_version_name');
+        const packageZip = core.getBooleanInput('package_zip');
         const setupVersion = getSetupVersion(core.getInput('app_version'));
         const buildDir = process.env.RUNNER_TEMP
             ? path.join(process.env.RUNNER_TEMP, 'p')
@@ -72429,6 +72549,23 @@ async function run() {
             await removeIfExists(tauriDataPath);
 
             const generatedDataPath = path.join(appDistDir, 'data');
+            if (packageZip) {
+                if (!fs.existsSync(generatedDataPath)) {
+                    throw new Error(`package_zip is enabled but no data was generated at ${generatedDataPath}`);
+                }
+                const mainScript = getProfileValue(config.profiles, profile, 'main_script');
+                if (!mainScript) throw new Error(`main_script not set for profile ${profile.name}`);
+                const cmdContent = buildRunCmd({
+                    appName,
+                    profileName: profile.name,
+                    scriptRelPath: resolveMainScript(generatedDataPath, appName, mainScript),
+                    pythonPath: getProfileValue(config.profiles, profile, 'python_path'),
+                    appVersion: readPreparedAppVersion(generatedDataPath, appName),
+                });
+                const zipPackagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion));
+                await createZipPackage(archiver, generatedDataPath, cmdContent, zipPackagePath, appName);
+                core.info(`Created zip package ${zipPackagePath}`);
+            }
             if (fs.existsSync(generatedDataPath)) {
                 await io.mv(generatedDataPath, tauriDataPath);
                 core.info(`Moved data for profile ${profile.name} to ${tauriDataPath}`);
