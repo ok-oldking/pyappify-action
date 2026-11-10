@@ -33,6 +33,11 @@ inputs:
     type: boolean
     default: false
 
+  package_zip_format:
+    description: archive format of the package_zip output, '7z' (solid LZMA2, much smaller, needs Windows 11 23H2+ or 7-Zip to open) or 'zip'
+    required: false
+    default: '7z'
+
 outputs:
   dist-path:
     description: The path to the directory containing the zipped application bundles.

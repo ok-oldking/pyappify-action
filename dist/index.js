@@ -61921,9 +61921,35 @@ function getProfileValue(profiles, profile, key) {
     return first[key];
 }
 
-function getZipPackageFileName(appName, platform, profileName, version) {
+const PACKAGE_FORMATS = ['7z', 'zip'];
+
+function getPackageFormat(input) {
+    const format = (input || '7z').trim().toLowerCase();
+    if (!PACKAGE_FORMATS.includes(format)) {
+        throw new Error(`package_zip_format must be one of ${PACKAGE_FORMATS.join(', ')}, got '${input}'`);
+    }
+    return format;
+}
+
+function getZipPackageFileName(appName, platform, profileName, version, format = 'zip') {
     const base = `${appName}-${platform}-${profileName}`;
-    return version ? `${base}-${version.replace(/^v/, '')}.zip` : `${base}.zip`;
+    return version ? `${base}-${version.replace(/^v/, '')}.${format}` : `${base}.${format}`;
+}
+
+// Removes every __pycache__ directory under dir; Python regenerates them on first import.
+function removePycache(dir) {
+    let removed = 0;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const full = path.join(dir, entry.name);
+        if (entry.name === '__pycache__') {
+            fs.rmSync(full, { recursive: true, force: true });
+            removed++;
+        } else {
+            removed += removePycache(full);
+        }
+    }
+    return removed;
 }
 
 // Mirrors pyappify's find_script_or_executable: working dir first, then python/Scripts (with extensions).
@@ -62013,11 +62039,32 @@ function createZipPackage(archiver, dataDir, cmdContent, zipFilePath, appName) {
     });
 }
 
+// Packs <parentDir>/<appName>/data and <parentDir>/<appName>/<appName>.cmd into a solid LZMA2 7z,
+// keeping <appName> as the root folder (7z stores the relative paths as given).
+async function create7zPackage(exec, sevenZip, parentDir, appName, cmdContent, archivePath) {
+    const cmdPath = path.join(parentDir, appName, `${appName}.cmd`);
+    fs.writeFileSync(cmdPath, cmdContent);
+    try {
+        await exec(sevenZip, [
+            'a', '-t7z', '-mx=7', '-ms=on', '-mmt=on', '-bsp0', '-bso0',
+            path.resolve(archivePath),
+            path.join(appName, 'data'),
+            path.join(appName, `${appName}.cmd`),
+        ], { cwd: parentDir });
+    } finally {
+        fs.rmSync(cmdPath, { force: true });
+    }
+}
+
 module.exports = {
+    PACKAGE_FORMATS,
     buildRunCmd,
+    create7zPackage,
     createZipPackage,
+    getPackageFormat,
     getProfileValue,
     getZipPackageFileName,
+    removePycache,
     readPreparedAppVersion,
     resolveMainScript,
 };
@@ -72246,12 +72293,23 @@ const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = __nccwpc
 const { getSetupVersion, setupProfile } = __nccwpck_require__(453);
 const {
     buildRunCmd,
+    create7zPackage,
     createZipPackage,
+    getPackageFormat,
     getProfileValue,
     getZipPackageFileName,
     readPreparedAppVersion,
+    removePycache,
     resolveMainScript,
 } = __nccwpck_require__(4250);
+
+async function find7z() {
+    const onPath = await io.which('7z', false);
+    if (onPath) return onPath;
+    const fallback = path.join(process.env.ProgramFiles || 'C:\\Program Files', '7-Zip', '7z.exe');
+    if (fs.existsSync(fallback)) return fallback;
+    throw new Error("package_zip_format is '7z' but 7z was not found on PATH or in Program Files.");
+}
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -72409,6 +72467,8 @@ async function run() {
         const buildExeOnly = core.getBooleanInput('build_exe_only');
         const addVersionName = core.getBooleanInput('add_version_name');
         const packageZip = core.getBooleanInput('package_zip');
+        const packageFormat = getPackageFormat(core.getInput('package_zip_format'));
+        const sevenZip = packageZip && packageFormat === '7z' ? await find7z() : null;
         const setupVersion = getSetupVersion(core.getInput('app_version'));
         const buildDir = process.env.RUNNER_TEMP
             ? path.join(process.env.RUNNER_TEMP, 'p')
@@ -72565,6 +72625,10 @@ async function run() {
             await removeIfExists(tauriDataPath);
 
             const generatedDataPath = path.join(appDistDir, 'data');
+            if (fs.existsSync(generatedDataPath)) {
+                const removed = removePycache(generatedDataPath);
+                core.info(`Removed ${removed} __pycache__ folders from ${generatedDataPath}`);
+            }
             if (packageZip) {
                 if (!fs.existsSync(generatedDataPath)) {
                     throw new Error(`package_zip is enabled but no data was generated at ${generatedDataPath}`);
@@ -72580,9 +72644,13 @@ async function run() {
                     admin: getProfileValue(config.profiles, profile, 'admin') === true,
                     usePythonw: getProfileValue(config.profiles, profile, 'use_pythonw') === true,
                 });
-                const zipPackagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion));
-                await createZipPackage(archiver, generatedDataPath, cmdContent, zipPackagePath, appName);
-                core.info(`Created zip package ${zipPackagePath}`);
+                const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
+                if (packageFormat === '7z') {
+                    await create7zPackage(exec.exec, sevenZip, distDir, appName, cmdContent, packagePath);
+                } else {
+                    await createZipPackage(archiver, generatedDataPath, cmdContent, packagePath, appName);
+                }
+                core.info(`Created ${packageFormat} package ${packagePath}`);
             }
             if (fs.existsSync(generatedDataPath)) {
                 await io.mv(generatedDataPath, tauriDataPath);

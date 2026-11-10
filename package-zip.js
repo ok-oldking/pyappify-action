@@ -18,9 +18,35 @@ function getProfileValue(profiles, profile, key) {
     return first[key];
 }
 
-function getZipPackageFileName(appName, platform, profileName, version) {
+const PACKAGE_FORMATS = ['7z', 'zip'];
+
+function getPackageFormat(input) {
+    const format = (input || '7z').trim().toLowerCase();
+    if (!PACKAGE_FORMATS.includes(format)) {
+        throw new Error(`package_zip_format must be one of ${PACKAGE_FORMATS.join(', ')}, got '${input}'`);
+    }
+    return format;
+}
+
+function getZipPackageFileName(appName, platform, profileName, version, format = 'zip') {
     const base = `${appName}-${platform}-${profileName}`;
-    return version ? `${base}-${version.replace(/^v/, '')}.zip` : `${base}.zip`;
+    return version ? `${base}-${version.replace(/^v/, '')}.${format}` : `${base}.${format}`;
+}
+
+// Removes every __pycache__ directory under dir; Python regenerates them on first import.
+function removePycache(dir) {
+    let removed = 0;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const full = path.join(dir, entry.name);
+        if (entry.name === '__pycache__') {
+            fs.rmSync(full, { recursive: true, force: true });
+            removed++;
+        } else {
+            removed += removePycache(full);
+        }
+    }
+    return removed;
 }
 
 // Mirrors pyappify's find_script_or_executable: working dir first, then python/Scripts (with extensions).
@@ -110,11 +136,32 @@ function createZipPackage(archiver, dataDir, cmdContent, zipFilePath, appName) {
     });
 }
 
+// Packs <parentDir>/<appName>/data and <parentDir>/<appName>/<appName>.cmd into a solid LZMA2 7z,
+// keeping <appName> as the root folder (7z stores the relative paths as given).
+async function create7zPackage(exec, sevenZip, parentDir, appName, cmdContent, archivePath) {
+    const cmdPath = path.join(parentDir, appName, `${appName}.cmd`);
+    fs.writeFileSync(cmdPath, cmdContent);
+    try {
+        await exec(sevenZip, [
+            'a', '-t7z', '-mx=7', '-ms=on', '-mmt=on', '-bsp0', '-bso0',
+            path.resolve(archivePath),
+            path.join(appName, 'data'),
+            path.join(appName, `${appName}.cmd`),
+        ], { cwd: parentDir });
+    } finally {
+        fs.rmSync(cmdPath, { force: true });
+    }
+}
+
 module.exports = {
+    PACKAGE_FORMATS,
     buildRunCmd,
+    create7zPackage,
     createZipPackage,
+    getPackageFormat,
     getProfileValue,
     getZipPackageFileName,
+    removePycache,
     readPreparedAppVersion,
     resolveMainScript,
 };

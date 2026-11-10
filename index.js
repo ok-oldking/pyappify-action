@@ -12,12 +12,23 @@ const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require(
 const { getSetupVersion, setupProfile } = require('./setup-profile');
 const {
     buildRunCmd,
+    create7zPackage,
     createZipPackage,
+    getPackageFormat,
     getProfileValue,
     getZipPackageFileName,
     readPreparedAppVersion,
+    removePycache,
     resolveMainScript,
 } = require('./package-zip');
+
+async function find7z() {
+    const onPath = await io.which('7z', false);
+    if (onPath) return onPath;
+    const fallback = path.join(process.env.ProgramFiles || 'C:\\Program Files', '7-Zip', '7z.exe');
+    if (fs.existsSync(fallback)) return fallback;
+    throw new Error("package_zip_format is '7z' but 7z was not found on PATH or in Program Files.");
+}
 
 async function setupPnpm() {
     core.startGroup('Setting up pnpm');
@@ -175,6 +186,8 @@ async function run() {
         const buildExeOnly = core.getBooleanInput('build_exe_only');
         const addVersionName = core.getBooleanInput('add_version_name');
         const packageZip = core.getBooleanInput('package_zip');
+        const packageFormat = getPackageFormat(core.getInput('package_zip_format'));
+        const sevenZip = packageZip && packageFormat === '7z' ? await find7z() : null;
         const setupVersion = getSetupVersion(core.getInput('app_version'));
         const buildDir = process.env.RUNNER_TEMP
             ? path.join(process.env.RUNNER_TEMP, 'p')
@@ -331,6 +344,10 @@ async function run() {
             await removeIfExists(tauriDataPath);
 
             const generatedDataPath = path.join(appDistDir, 'data');
+            if (fs.existsSync(generatedDataPath)) {
+                const removed = removePycache(generatedDataPath);
+                core.info(`Removed ${removed} __pycache__ folders from ${generatedDataPath}`);
+            }
             if (packageZip) {
                 if (!fs.existsSync(generatedDataPath)) {
                     throw new Error(`package_zip is enabled but no data was generated at ${generatedDataPath}`);
@@ -346,9 +363,13 @@ async function run() {
                     admin: getProfileValue(config.profiles, profile, 'admin') === true,
                     usePythonw: getProfileValue(config.profiles, profile, 'use_pythonw') === true,
                 });
-                const zipPackagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion));
-                await createZipPackage(archiver, generatedDataPath, cmdContent, zipPackagePath, appName);
-                core.info(`Created zip package ${zipPackagePath}`);
+                const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
+                if (packageFormat === '7z') {
+                    await create7zPackage(exec.exec, sevenZip, distDir, appName, cmdContent, packagePath);
+                } else {
+                    await createZipPackage(archiver, generatedDataPath, cmdContent, packagePath, appName);
+                }
+                core.info(`Created ${packageFormat} package ${packagePath}`);
             }
             if (fs.existsSync(generatedDataPath)) {
                 await io.mv(generatedDataPath, tauriDataPath);

@@ -44,7 +44,8 @@ profiles:
 | `use_release` | A GitHub release API url whose assets are reused to skip building the exe. | | `false` |
 | `build_exe_only` | Only build the exe and output `exe-path` so it can be signed before running the action again. | `false` | `false` |
 | `add_version_name` | Add the app version (the pushed git tag, leading `v` removed) to the setup exe names, e.g. `xxx-setup-1.1.0.exe` or `xxx-setup-1.1.0-beta.1.exe`. | `false` | `false` |
-| `package_zip` | Also create a portable zip per profile, `<name>-<platform>-<profile>.zip` (version appended when `add_version_name` is on). Its root folder is the app name and holds the prepared `data` folder (Python env + app) and a `<name>.cmd` that runs the main script with the bundled Python. No Tauri exe, no installer. The `.cmd` honors the profile's `admin` (relaunches itself elevated via UAC) and `use_pythonw` (runs with `pythonw.exe` and closes its console right away). | `false` | `false` |
+| `package_zip_format` | Archive format of the `package_zip` output: `7z` (solid LZMA2, about a third smaller than zip and smaller than the setup exe; opens in File Explorer on Windows 11 23H2+, otherwise needs 7-Zip) or `zip`. | `7z` | `false` |
+| `package_zip` | Also create a portable archive per profile, `<name>-<platform>-<profile>.7z` or `.zip` per `package_zip_format` (version appended when `add_version_name` is on). Its root folder is the app name and holds the prepared `data` folder (Python env + app) and a `<name>.cmd` that runs the main script with the bundled Python. No Tauri exe, no installer. The `.cmd` honors the profile's `admin` (relaunches itself elevated via UAC) and `use_pythonw` (runs with `pythonw.exe` and closes its console right away). | `false` | `false` |
 
 ## Usage Example
 
@@ -86,6 +87,10 @@ jobs:
 ```
 
 ## How It Works
+
+`__pycache__` folders are removed from each profile's prepared data before it is
+bundled into the setup exe and the `package_zip` archive. Python recreates them
+on the app's first start, which makes that first start somewhat slower.
 
 Tag-triggered builds prepare that exact application tag before installing Python
 dependencies. Branch or manual builds can set `app_version` explicitly; without
