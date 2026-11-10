@@ -22,6 +22,7 @@ This file defines your application's name and its build profiles.
 
 ```yaml
 name: "pyappify-sample" # English only
+keep_releases: 30 # optional: keep only the 30 newest releases (plus newer prereleases) in the app's git repo, cutting older history; omit to keep all
 profiles:
   - name: "release_正式版" # can use Unicode chars
     git_url: "https://github.com/ok-oldking/pyappify-action.git" # the repo url to clone, must have tags for the version management, semver is recommended

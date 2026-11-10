@@ -10,6 +10,7 @@ const archiver = require('archiver');
 const http = require('@actions/http-client');
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require('./build-config');
 const { getSetupVersion, setupProfile } = require('./setup-profile');
+const { getKeepReleases, trimRepo } = require('./trim-repo');
 const {
     buildRunCmd,
     create7zPackage,
@@ -207,6 +208,7 @@ async function run() {
         const config = yaml.load(fs.readFileSync(configFile, 'utf8'));
         const appName = config.name;
         if (!appName || !config.profiles) throw new Error(`'name' or 'profiles' not found in ${configFile}.`);
+        const keepReleases = getKeepReleases(config);
 
         const appDistDir = path.join(distDir, appName);
         fs.mkdirSync(appDistDir, { recursive: true });
@@ -347,6 +349,10 @@ async function run() {
             if (fs.existsSync(generatedDataPath)) {
                 const removed = removePycache(generatedDataPath);
                 core.info(`Removed ${removed} __pycache__ folders from ${generatedDataPath}`);
+            }
+            const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
+            if (keepReleases && fs.existsSync(bundledRepoPath)) {
+                await trimRepo(exec.exec, bundledRepoPath, keepReleases, message => core.info(message));
             }
             if (packageZip) {
                 if (!fs.existsSync(generatedDataPath)) {
