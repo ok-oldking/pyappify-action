@@ -44,11 +44,17 @@ profiles:
 | `version` | The tag version of pyappify to use (e.g., `v0.1.0`). It is highly recommended to pin a version for consistency. You can checkout the versions at https://github.com/ok-oldking/pyappify/releases | `latest` tag | `false`  |
 | `use_release` | A GitHub release API url whose assets are reused to skip building the exe. | | `false` |
 | `build_exe_only` | Only build the exe and output `exe-path` so it can be signed before running the action again. | `false` | `false` |
+| `build_setup` | Build the online and per-profile setup executables. Set to `false` for portable archives only. | `true` | `false` |
 | `add_version_name` | Add the app version (the pushed git tag, leading `v` removed) to the setup exe names, e.g. `xxx-setup-1.1.0.exe` or `xxx-setup-1.1.0-beta.1.exe`. | `false` | `false` |
 | `package_zip_format` | Archive format of the `package_zip` output: `7z` (solid LZMA2, about a third smaller than zip and smaller than the setup exe; opens in File Explorer on Windows 11 23H2+, otherwise needs 7-Zip) or `zip`. | `7z` | `false` |
 | `package_zip` | Also create a portable archive per profile, `<name>-<platform>-<profile>.7z` or `.zip` per `package_zip_format` (version appended when `add_version_name` is on). Its root folder is the app name and holds the prepared `data` folder (Python env + app) and a `<name>.cmd` that runs the main script with the bundled Python. No Tauri exe, no installer. The `.cmd` honors the profile's `admin` (relaunches itself elevated via UAC) and `use_pythonw` (runs with `pythonw.exe` and closes its console right away). | `false` | `false` |
 
 ## Usage Example
+
+At least one of `build_setup` or `package_zip` must be `true`. The
+`build_exe_only` signing step is exempt and returns only the launcher binary.
+Setting `build_setup: false` skips all installer bundling; the launcher is still
+built or reused to prepare each profile's portable archive.
 
 This example demonstrates how to build your application on Windows, macOS, and Ubuntu(Currently only support windows), and then release the resulting packages. 
 

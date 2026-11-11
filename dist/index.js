@@ -72629,10 +72629,14 @@ async function run() {
     try {
         const useRelease = core.getInput('use_release');
         const buildExeOnly = core.getBooleanInput('build_exe_only');
+        const buildSetup = core.getBooleanInput('build_setup');
         const addVersionName = core.getBooleanInput('add_version_name');
         const packageZip = core.getBooleanInput('package_zip');
         const packageFormat = getPackageFormat(core.getInput('package_zip_format'));
-        const sevenZip = packageZip && packageFormat === '7z' ? await find7z() : null;
+        if (!buildExeOnly && !buildSetup && !packageZip) {
+            throw new Error('At least one of build_setup or package_zip must be true.');
+        }
+        const sevenZip = !buildExeOnly && packageZip && packageFormat === '7z' ? await find7z() : null;
         const setupVersion = getSetupVersion(core.getInput('app_version'));
         const buildDir = process.env.RUNNER_TEMP
             ? path.join(process.env.RUNNER_TEMP, 'p')
@@ -72728,19 +72732,19 @@ async function run() {
                 await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath, exeSourcePath);
                 core.endGroup();
             } else {
-                await exec.exec('pnpm', ['tauri', 'build'], { cwd: buildDir });
+                await exec.exec('pnpm', ['tauri', 'build', '--no-bundle'], { cwd: buildDir });
                 core.endGroup();
-                if (buildExeOnly) {
-                    if (!fs.existsSync(exeSourcePath)) {
-                        throw new Error(`Binary not found at ${exeSourcePath} after build attempt.`);
-                    }
-                    const exeSourceFolder = path.dirname(exeSourcePath);
-                    core.setOutput('exe-path', exeSourcePath);
-                    core.setOutput('exe-folder', exeSourceFolder);
-                    core.info(`build_exe_only is true. Action finished. Exe path: ${exeSourcePath}`);
-                    return;
-                }
             }
+        }
+
+        if (buildExeOnly) {
+            if (!fs.existsSync(exeSourcePath)) {
+                throw new Error(`Binary not found at ${exeSourcePath} after build attempt.`);
+            }
+            core.setOutput('exe-path', exeSourcePath);
+            core.setOutput('exe-folder', path.dirname(exeSourcePath));
+            core.info(`build_exe_only is true. Action finished. Exe path: ${exeSourcePath}`);
+            return;
         }
 
         core.startGroup('Packaging application profiles');
@@ -72766,21 +72770,23 @@ async function run() {
 
         core.info(`read profiles ${config.profiles}`);
 
-        core.startGroup('Creating online installer');
-        const tauriDataPath = path.join(buildDir, 'src-tauri', 'data')
-        await removeIfExists(tauriDataPath);
-        await io.mkdirP(tauriDataPath);
-        await exec.exec('pnpm', ['tauri', 'bundle'], { cwd: buildDir });
-        const nsisDirOnline = path.join(buildDir, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
-        const onlineInstallerFile = fs.readdirSync(nsisDirOnline).find(f => f.endsWith('.exe'));
-        if (!onlineInstallerFile) {
-            throw new Error(`Could not find the generated NSIS installer for the online setup in ${nsisDirOnline}`);
+        const tauriDataPath = path.join(buildDir, 'src-tauri', 'data');
+        if (buildSetup) {
+            core.startGroup('Creating online installer');
+            await removeIfExists(tauriDataPath);
+            await io.mkdirP(tauriDataPath);
+            await exec.exec('pnpm', ['tauri', 'bundle'], { cwd: buildDir });
+            const nsisDirOnline = path.join(buildDir, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
+            const onlineInstallerFile = fs.readdirSync(nsisDirOnline).find(f => f.endsWith('.exe'));
+            if (!onlineInstallerFile) {
+                throw new Error(`Could not find the generated NSIS installer for the online setup in ${nsisDirOnline}`);
+            }
+            const onlineInstallerName = getInstallerFileName(`${appName}-${platform}-online-setup`, appVersion);
+            const onlineInstallerDest = path.join(distDir, onlineInstallerName);
+            await io.mv(path.join(nsisDirOnline, onlineInstallerFile), onlineInstallerDest);
+            core.info(`Created and moved online installer to ${onlineInstallerDest}`);
+            core.endGroup();
         }
-        const onlineInstallerName = getInstallerFileName(`${appName}-${platform}-online-setup`, appVersion);
-        const onlineInstallerDest = path.join(distDir, onlineInstallerName);
-        await io.mv(path.join(nsisDirOnline, onlineInstallerFile), onlineInstallerDest);
-        core.info(`Created and moved online installer to ${onlineInstallerDest}`);
-        core.endGroup();
 
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
@@ -72821,25 +72827,27 @@ async function run() {
                 }
                 core.info(`Created ${packageFormat} package ${packagePath}`);
             }
-            if (fs.existsSync(generatedDataPath)) {
-                await io.mv(generatedDataPath, tauriDataPath);
-                core.info(`Moved data for profile ${profile.name} to ${tauriDataPath}`);
+            if (buildSetup) {
+                if (fs.existsSync(generatedDataPath)) {
+                    await io.mv(generatedDataPath, tauriDataPath);
+                    core.info(`Moved data for profile ${profile.name} to ${tauriDataPath}`);
+                }
+
+                await exec.exec('pnpm', ['tauri', 'bundle'], { cwd: buildDir });
+
+                const nsisDir = path.join(buildDir, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
+                const files = fs.readdirSync(nsisDir);
+                const nsisInstallerFile = files.find(f => f.endsWith('.exe'));
+                if (!nsisInstallerFile) {
+                    throw new Error(`Could not find the generated NSIS installer in ${nsisDir}`);
+                }
+                const sourceInstallerPath = path.join(nsisDir, nsisInstallerFile);
+
+                const newInstallerName = getInstallerFileName(`${appName}-${platform}-${profile.name}-setup`, appVersion);
+                const destInstallerPath = path.join(distDir, newInstallerName);
+                await io.mv(sourceInstallerPath, destInstallerPath);
+                core.info(`Created and moved installer to ${destInstallerPath}`);
             }
-
-            await exec.exec('pnpm', ['tauri', 'bundle'], { cwd: buildDir });
-
-            const nsisDir = path.join(buildDir, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
-            const files = fs.readdirSync(nsisDir);
-            const nsisInstallerFile = files.find(f => f.endsWith('.exe'));
-            if (!nsisInstallerFile) {
-                throw new Error(`Could not find the generated NSIS installer in ${nsisDir}`);
-            }
-            const sourceInstallerPath = path.join(nsisDir, nsisInstallerFile);
-
-            const newInstallerName = getInstallerFileName(`${appName}-${platform}-${profile.name}-setup`, appVersion);
-            const destInstallerPath = path.join(distDir, newInstallerName);
-            await io.mv(sourceInstallerPath, destInstallerPath);
-            core.info(`Created and moved installer to ${destInstallerPath}`);
 
             for (const file of fs.readdirSync(appDistDir)) {
                 if (file !== appBinaryName) {

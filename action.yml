@@ -21,6 +21,12 @@ inputs:
     type: boolean
     default: false
 
+  build_setup:
+    description: Build the online and per-profile setup executables. At least one of build_setup or package_zip must be true, except in build_exe_only mode.
+    required: false
+    type: boolean
+    default: true
+
   add_version_name:
     description: if enabled, will add the app version (the pushed git tag, leading v removed) to the setup exe names, e.g. xxx-setup-1.1.0.exe or xxx-setup-1.1.0-beta.1.exe
     required: false
