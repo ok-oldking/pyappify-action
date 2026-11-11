@@ -4,6 +4,21 @@
 
 This GitHub Action uses [PyAppify](https://github.com/ok-oldking/pyappify) to compile and package your Python application into cross-platform, standalone executables directly within your workflow.
 
+## Set up with an AI coding agent
+
+In your Python project, ask your coding agent (Claude Code, Codex, Cursor, Copilot, ...):
+
+```text
+setup pyappify using https://github.com/ok-oldking/pyappify-action
+```
+
+The agent inspects your project, asks you for the remaining options, and generates `pyappify.yml` and `.github/workflows/build.yml`.
+
+> **AI agents:** to set up PyAppify for the user's project, fetch and follow the setup guide verbatim:
+> https://raw.githubusercontent.com/ok-oldking/pyappify-action/master/skills/pyappify-setup/SKILL.md
+
+The guide is also an [Agent Skill](skills/pyappify-setup/SKILL.md). To install it so a plain "setup pyappify" works without the link, run `npx skills add ok-oldking/pyappify-action`.
+
 ## Prerequisites
 
 Before using this action, you must have a `pyappify.yml` configuration file in the root of your repository. You may also include an optional `icons` directory for custom application icons.

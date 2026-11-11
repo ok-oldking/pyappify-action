@@ -1,0 +1,13 @@
+# PyAppify Action
+
+> GitHub Action that packages a Python project with PyAppify into a Windows launcher, setup installers and portable 7z/zip archives, built on every pushed version tag. Configured by a `pyappify.yml` in the project root.
+
+If you are an AI coding agent asked to set up PyAppify for a project, fetch and follow this guide. It covers inspecting the project, the questions to ask the user, every `pyappify.yml` and action option, and the workflow template:
+
+- [PyAppify setup guide](https://raw.githubusercontent.com/ok-oldking/pyappify-action/master/skills/pyappify-setup/SKILL.md): step-by-step instructions to generate pyappify.yml and .github/workflows/build.yml
+
+## Reference
+
+- [README](https://raw.githubusercontent.com/ok-oldking/pyappify-action/master/README.md): action inputs and usage
+- [action.yml](https://raw.githubusercontent.com/ok-oldking/pyappify-action/master/action.yml): input and output definitions
+- [PyAppify launcher](https://github.com/ok-oldking/pyappify): launcher behavior, pyappify.yml origin, releases
