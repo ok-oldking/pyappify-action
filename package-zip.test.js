@@ -8,6 +8,7 @@ const {
     buildRunCmd,
     create7zPackage,
     getPackageFormat,
+    getProfilePythonPath,
     getProfileValue,
     getZipPackageFileName,
     removePycache,
@@ -63,6 +64,14 @@ test('7z package keeps app name as root and excludes the exe', { skip: !sevenZip
 test('profile values fall back to the first profile', () => {
     const profiles = [{ name: 'a', main_script: 'main.py' }, { name: 'b' }];
     assert.strictEqual(getProfileValue(profiles, profiles[1], 'main_script'), 'main.py');
+});
+
+test('PYTHONPATH is read from the upper-case key and inherited', () => {
+    const profiles = [{ name: 'a', PYTHONPATH: 'src' }, { name: 'b' }, { name: 'c', PYTHONPATH: 'lib' }];
+    assert.strictEqual(getProfilePythonPath(profiles, profiles[0]), 'src');
+    assert.strictEqual(getProfilePythonPath(profiles, profiles[1]), 'src');
+    assert.strictEqual(getProfilePythonPath(profiles, profiles[2]), 'lib');
+    assert.strictEqual(getProfilePythonPath([{ name: 'a', python_path: 'src' }], { name: 'a', python_path: 'src' }), '');
 });
 
 test('resolves scripts in working dir before python Scripts', () => {

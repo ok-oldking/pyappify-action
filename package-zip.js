@@ -18,6 +18,11 @@ function getProfileValue(profiles, profile, key) {
     return first[key];
 }
 
+// pyappify.yml spells the profile's PYTHONPATH key in upper case, as the launcher reads it.
+function getProfilePythonPath(profiles, profile) {
+    return getProfileValue(profiles, profile, 'PYTHONPATH') || '';
+}
+
 const PACKAGE_FORMATS = ['7z', 'zip'];
 
 function getPackageFormat(input) {
@@ -159,6 +164,7 @@ module.exports = {
     create7zPackage,
     createZipPackage,
     getPackageFormat,
+    getProfilePythonPath,
     getProfileValue,
     getZipPackageFileName,
     removePycache,
