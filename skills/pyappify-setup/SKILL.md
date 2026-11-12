@@ -60,6 +60,11 @@ the user can just confirm. Only ask the questions that apply:
 6. **Outputs** – setup installer exe (`build_setup`, default yes), portable
    archive per profile (`package_zip`, default no), archive format
    (`7z` default, or `zip`). At least one of installer/archive must be on.
+   With archives, the archive also gets an `<name>-updater.cmd` that opens the
+   pyappify update window (`package_zip_updater`, default yes). It needs
+   `pyappify[standalone]>=1.0.20` in the app's requirements and Python 3.10+.
+   If the user wants it, add that line to the requirements file `requirements`
+   points at. Otherwise the action skips it with a warning.
 7. **Version in file names?** (`add_version_name`, e.g. `MyApp-win32-release-setup-1.2.0.exe`). Default: no.
 8. **Limit kept releases?** (`keep_releases`, e.g. 30, shrinks the bundled git
    repo and future clones). Default: keep all.
@@ -130,6 +135,7 @@ supported yet) when a `v*` tag is pushed. Action inputs (all optional):
 |---|---|---|
 | `build_setup` | `true` | Build the online setup exe and one offline setup exe per profile. |
 | `package_zip` | `false` | Also build a portable archive per profile: app-name folder with the prepared `data` (Python + venv + app) and `<name>.cmd` launcher. Honors `admin` and `use_pythonw`. |
+| `package_zip_updater` | `true` | Add `<name>-updater.cmd` to each archive: opens the pyappify Tk update window (version list with notes, pip mirror, update, restart via `<name>.cmd`). Needs `pyappify[standalone]>=1.0.20` (Python 3.10+) in the app's requirements; skipped with a warning otherwise. |
 | `package_zip_format` | `7z` | `7z` (much smaller; opens natively on Windows 11 23H2+, otherwise needs 7-Zip) or `zip`. |
 | `add_version_name` | `false` | Append the tag version (leading `v` removed) to installer/archive names. |
 | `version` | latest | Pin a PyAppify launcher tag, e.g. `v1.2.6`, from https://github.com/ok-oldking/pyappify/releases. Must be v1.2.4+. Recommended for reproducible builds. |

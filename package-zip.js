@@ -117,6 +117,66 @@ function buildRunCmd({ appName, profileName, scriptRelPath, pythonPath, appVersi
     return lines.join('\r\n') + '\r\n';
 }
 
+function getUpdaterCmdName(appName) {
+    return `${appName}-updater.cmd`;
+}
+
+// The updater window ships with pyappify 1.0.20+ (pyappify/updater_ui.py) and needs Dulwich to read the repo.
+// Returns '' when the bundled Python can run it, otherwise the reason it cannot.
+function checkUpdaterSupport(dataDir, appName) {
+    const sitePackages = path.join(dataDir, 'apps', appName, 'python', 'Lib', 'site-packages');
+    if (!fs.existsSync(path.join(sitePackages, 'pyappify', 'updater_ui.py'))) {
+        return 'the bundled Python has no pyappify package with the updater window (pyappify 1.0.20 or newer)';
+    }
+    if (!fs.existsSync(path.join(sitePackages, 'dulwich'))) {
+        return 'the bundled Python has no Dulwich; depend on "pyappify[standalone]" (Python 3.10+)';
+    }
+    if (!fs.existsSync(path.join(dataDir, 'apps', appName, 'repo'))) {
+        return `no app repository at ${path.join(dataDir, 'apps', appName, 'repo')}`;
+    }
+    return '';
+}
+
+// Python run by the updater cmd. It must not contain ", %, ^, &, |, < or > so it survives cmd.exe quoting.
+// It writes the session the window reads (and deletes): the app's repo and profile, and how to restart
+// the app afterwards (the run cmd). The window detects the current version from the repo itself.
+const UPDATER_SESSION_SCRIPT = [
+    'import json,os,sys,tempfile',
+    'from pyappify import updater_ui',
+    'e=os.environ',
+    'r=e[\'PYAPPIFY_PACKAGE_ROOT\']',
+    'n=e[\'PYAPPIFY_APP_NAME\']',
+    'f,p=tempfile.mkstemp(prefix=\'pyappify-updater-\',suffix=\'.json\')',
+    'os.write(f,json.dumps(dict(repo_path=os.path.join(r,\'data\',\'apps\',n,\'repo\'),app_name=n,app_profile=e[\'PYAPPIFY_APP_PROFILE\'],relaunch=dict(argv=[e.get(\'ComSpec\',\'cmd.exe\'),\'/c\',os.path.join(r,e[\'PYAPPIFY_RUN_CMD\'])],cwd=r,pythonpath=None))).encode(\'utf-8\'))',
+    'os.close(f)',
+    'sys.exit(updater_ui.main([\'--session\',p]))',
+].join(';');
+
+function buildUpdaterCmd({ appName, profileName, runCmdName }) {
+    const appBase = `%~dp0data\\apps\\${appName}`;
+    const lines = [
+        '@echo off',
+        'chcp 65001 >nul',
+        'setlocal',
+        ...PYTHON_ENVS_TO_CLEAR.map(name => `set "${name}="`),
+        'set "PYAPPIFY_APP_VERSION="',
+        'set "PYAPPIFY_APP_STARTING_VERSION="',
+        'set "PYAPPIFY_VERSION="',
+        'set "PYAPPIFY_EXECUTABLE="',
+        'set "PYAPPIFY_PACKAGE_ROOT=%~dp0"',
+        `set "PYAPPIFY_APP_NAME=${appName}"`,
+        `set "PYAPPIFY_APP_PROFILE=${profileName}"`,
+        `set "PYAPPIFY_RUN_CMD=${runCmdName}"`,
+        'set "PYTHONIOENCODING=utf-8"',
+        'set "PYTHONNOUSERSITE=1"',
+        // Never start inside repo or working: the updater may move or rewrite them.
+        `cd /d "${appBase}"`,
+        `start "" "${appBase}\\python\\pythonw.exe" -c "${UPDATER_SESSION_SCRIPT}"`,
+        'exit /b 0',
+    ];
+    return lines.join('\r\n') + '\r\n';
+}
+
 function readPreparedAppVersion(dataDir, appName) {
     const appJsonPath = path.join(dataDir, 'apps', appName, 'app.json');
     if (!fs.existsSync(appJsonPath)) return '';
@@ -127,7 +187,8 @@ function readPreparedAppVersion(dataDir, appName) {
     }
 }
 
-function createZipPackage(archiver, dataDir, cmdContent, zipFilePath, appName) {
+// cmdFiles: [{ name, content }] written next to data in the package root.
+function createZipPackage(archiver, dataDir, cmdFiles, zipFilePath, appName) {
     return new Promise((resolve, reject) => {
         const output = fs.createWriteStream(zipFilePath);
         const archive = archiver('zip', { zlib: { level: 9 } });
@@ -136,36 +197,42 @@ function createZipPackage(archiver, dataDir, cmdContent, zipFilePath, appName) {
         archive.on('error', reject);
         archive.pipe(output);
         archive.directory(dataDir, `${appName}/data`);
-        archive.append(cmdContent, { name: `${appName}/${appName}.cmd` });
+        for (const { name, content } of cmdFiles) archive.append(content, { name: `${appName}/${name}` });
         archive.finalize();
     });
 }
 
-// Packs <parentDir>/<appName>/data and <parentDir>/<appName>/<appName>.cmd into a solid LZMA2 7z,
+// Packs <parentDir>/<appName>/data and the cmdFiles into a solid LZMA2 7z,
 // keeping <appName> as the root folder (7z stores the relative paths as given).
-async function create7zPackage(exec, sevenZip, parentDir, appName, cmdContent, archivePath) {
-    const cmdPath = path.join(parentDir, appName, `${appName}.cmd`);
-    fs.writeFileSync(cmdPath, cmdContent);
+async function create7zPackage(exec, sevenZip, parentDir, appName, cmdFiles, archivePath) {
+    const cmdPaths = cmdFiles.map(({ name, content }) => {
+        const cmdPath = path.join(parentDir, appName, name);
+        fs.writeFileSync(cmdPath, content);
+        return cmdPath;
+    });
     try {
         await exec(sevenZip, [
             'a', '-t7z', '-mx=7', '-ms=on', '-mmt=on', '-bsp0', '-bso0',
             path.resolve(archivePath),
             path.join(appName, 'data'),
-            path.join(appName, `${appName}.cmd`),
+            ...cmdFiles.map(({ name }) => path.join(appName, name)),
         ], { cwd: parentDir });
     } finally {
-        fs.rmSync(cmdPath, { force: true });
+        for (const cmdPath of cmdPaths) fs.rmSync(cmdPath, { force: true });
     }
 }
 
 module.exports = {
     PACKAGE_FORMATS,
     buildRunCmd,
+    buildUpdaterCmd,
+    checkUpdaterSupport,
     create7zPackage,
     createZipPackage,
     getPackageFormat,
     getProfilePythonPath,
     getProfileValue,
+    getUpdaterCmdName,
     getZipPackageFileName,
     removePycache,
     readPreparedAppVersion,

@@ -6,6 +6,8 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const {
     buildRunCmd,
+    buildUpdaterCmd,
+    checkUpdaterSupport,
     create7zPackage,
     getPackageFormat,
     getProfilePythonPath,
@@ -50,14 +52,19 @@ test('7z package keeps app name as root and excludes the exe', { skip: !sevenZip
     fs.writeFileSync(path.join(dist, 'app', 'app.exe'), 'exe');
     const out = path.join(dist, 'app-win32-release.7z');
     const exec = async (cmd, args, opts) => execFileSync(cmd, args, { cwd: opts.cwd });
-    await create7zPackage(exec, sevenZip, dist, 'app', '@echo off\r\n', out);
+    const cmdFiles = [
+        { name: 'app.cmd', content: '@echo off\r\n' },
+        { name: 'app-updater.cmd', content: '@echo off\r\n' },
+    ];
+    await create7zPackage(exec, sevenZip, dist, 'app', cmdFiles, out);
     const listing = execFileSync(sevenZip, ['l', '-slt', out]).toString();
     const names = [...listing.matchAll(/^Path = (.+)$/gm)].map(m => m[1].trim()).slice(1).sort();
     assert.deepStrictEqual(names, [
-        'app', 'app\\app.cmd', 'app\\data', 'app\\data\\apps', 'app\\data\\apps\\app',
+        'app', 'app\\app-updater.cmd', 'app\\app.cmd', 'app\\data', 'app\\data\\apps', 'app\\data\\apps\\app',
         'app\\data\\apps\\app\\working', 'app\\data\\apps\\app\\working\\main.py',
     ].filter(n => n !== 'app').sort());
     assert.ok(!fs.existsSync(path.join(dist, 'app', 'app.cmd')), 'temporary cmd is removed');
+    assert.ok(!fs.existsSync(path.join(dist, 'app', 'app-updater.cmd')), 'temporary updater cmd is removed');
     fs.rmSync(dist, { recursive: true, force: true });
 });
 
@@ -114,4 +121,32 @@ test('run cmd self-elevates for admin and detaches with pythonw', () => {
     assert.ok(cmd.indexOf('fltmc') < cmd.indexOf('cd /d'));
     assert.match(cmd, /-Verb RunAs -WindowStyle Hidden/);
     assert.match(cmd, /start "" "%~dp0data\\apps\\app\\python\\pythonw\.exe" "%~dp0data\\apps\\app\\working\\main\.py" %\*/);
+});
+
+test('updater cmd opens the pyappify update window for the profile', () => {
+    const cmd = buildUpdaterCmd({ appName: 'app', profileName: 'release', runCmdName: 'app.cmd' });
+    assert.match(cmd, /set "PYAPPIFY_APP_PROFILE=release"/);
+    assert.match(cmd, /set "PYAPPIFY_RUN_CMD=app\.cmd"/);
+    assert.match(cmd, /set "PYAPPIFY_APP_VERSION="/);
+    assert.match(cmd, /cd \/d "%~dp0data\\apps\\app"\r\n/);
+    const launch = cmd.split('\r\n').find(line => line.startsWith('start '));
+    assert.match(launch, /^start "" "%~dp0data\\apps\\app\\python\\pythonw\.exe" -c "/);
+    const script = launch.slice(launch.indexOf('-c "') + 4, -1);
+    assert.match(script, /updater_ui\.main\(\['--session',p\]\)/);
+    assert.doesNotMatch(script, /["%^&|<>]/, 'script must survive cmd.exe quoting');
+});
+
+test('updater needs pyappify with the updater window, dulwich and the repo', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pu-'));
+    const base = path.join(root, 'apps', 'app');
+    const site = path.join(base, 'python', 'Lib', 'site-packages');
+    fs.mkdirSync(path.join(site, 'pyappify'), { recursive: true });
+    assert.match(checkUpdaterSupport(root, 'app'), /pyappify/);
+    fs.writeFileSync(path.join(site, 'pyappify', 'updater_ui.py'), '');
+    assert.match(checkUpdaterSupport(root, 'app'), /Dulwich/);
+    fs.mkdirSync(path.join(site, 'dulwich'));
+    assert.match(checkUpdaterSupport(root, 'app'), /repository/);
+    fs.mkdirSync(path.join(base, 'repo'));
+    assert.strictEqual(checkUpdaterSupport(root, 'app'), '');
+    fs.rmSync(root, { recursive: true, force: true });
 });

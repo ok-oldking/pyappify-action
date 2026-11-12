@@ -97,7 +97,7 @@ Everything is written to `pyappify_dist/`. For an app named `my-app` with `relea
 |---|---|
 | `my-app-win32-release-setup.exe` | **Offline installer** per profile: launcher, Python, venv, dependencies and your app. |
 | `my-app-win32-online-setup.exe` | **Online installer**: the launcher only. Downloads Python, your code and dependencies on first run, and lets the user pick a profile. |
-| `my-app-win32-release.7z` | **Portable archive** per profile (`package_zip: true`). Unpack and run `my-app.cmd`. No installer and no launcher UI. |
+| `my-app-win32-release.7z` | **Portable archive** per profile (`package_zip: true`). Unpack and run `my-app.cmd`. No installer and no launcher UI. `my-app-updater.cmd` opens the update window ([portable updates](#portable-updates)). |
 | `my-app-win32.zip` | The bare launcher exe, which behaves like the online installer without installing. |
 | `win32_sha256.txt` | SHA-256 of the launcher exe. |
 
@@ -140,6 +140,7 @@ All inputs are optional.
 | `version` | latest tag | PyAppify launcher version to build, e.g. `v1.2.6`. Pin it for reproducible builds. It must be v1.2.4 or newer. |
 | `build_setup` | `true` | Build the online installer and one offline installer per profile. |
 | `package_zip` | `false` | Build a portable archive per profile. Its `.cmd` honors `admin`, `use_pythonw` and `PYTHONPATH`. |
+| `package_zip_updater` | `true` | Add `<name>-updater.cmd` to each archive. Skipped with a warning unless the app depends on `pyappify[standalone]` 1.0.20+. |
 | `package_zip_format` | `7z` | `7z`: solid LZMA2, about a third smaller than zip. It opens natively on Windows 11 23H2+, otherwise needs 7-Zip. Or `zip`. |
 | `add_version_name` | `false` | Append the tag version (without the leading `v`) to installer and archive names. |
 | `app_version` | pushed tag | Exact app tag to package, prereleases included. On tag builds it defaults to that tag. Set it for manual or branch builds; otherwise they package the latest stable tag. |
@@ -147,6 +148,18 @@ All inputs are optional.
 | `build_exe_only` | `false` | Only build the launcher exe and output its path, so you can code-sign it. Then run the action again in the same job to package with the signed exe. |
 
 At least one of `build_setup` and `package_zip` must be `true`.
+
+### Portable updates
+
+Portable archives have no launcher, so updates use the update window from the [`pyappify` Python package](https://pypi.org/project/pyappify/). Add it to your app's requirements:
+
+```
+pyappify[standalone]>=1.0.20
+```
+
+Each archive then also gets `my-app-updater.cmd`. It opens a window where users pick a version (releases, or pre-releases with "All") and read its notes. They can also choose the pip mirror. The window then checks the version out into the bundled repo, installs its dependencies, and restarts the app through `my-app.cmd`. The extra requires Python 3.10+ (for Dulwich). Without it the action builds the archive without the updater cmd and logs a warning. Set `package_zip_updater: false` to leave it out.
+
+When the updater cmd is included, `my-app.cmd` no longer hardcodes the packaged version. `pyappify.app_version` is read from the repo instead, so it stays correct after an update.
 
 ### Outputs
 

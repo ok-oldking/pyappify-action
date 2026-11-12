@@ -13,11 +13,14 @@ const { getSetupVersion, setupProfile } = require('./setup-profile');
 const { getKeepReleases, trimRepo } = require('./trim-repo');
 const {
     buildRunCmd,
+    buildUpdaterCmd,
+    checkUpdaterSupport,
     create7zPackage,
     createZipPackage,
     getPackageFormat,
     getProfilePythonPath,
     getProfileValue,
+    getUpdaterCmdName,
     getZipPackageFileName,
     readPreparedAppVersion,
     removePycache,
@@ -190,6 +193,7 @@ async function run() {
         const addVersionName = core.getBooleanInput('add_version_name');
         const packageZip = core.getBooleanInput('package_zip');
         const packageFormat = getPackageFormat(core.getInput('package_zip_format'));
+        const packageZipUpdater = core.getBooleanInput('package_zip_updater');
         if (!buildExeOnly && !buildSetup && !packageZip) {
             throw new Error('At least one of build_setup or package_zip must be true.');
         }
@@ -367,20 +371,34 @@ async function run() {
                 }
                 const mainScript = getProfileValue(config.profiles, profile, 'main_script');
                 if (!mainScript) throw new Error(`main_script not set for profile ${profile.name}`);
-                const cmdContent = buildRunCmd({
-                    appName,
-                    profileName: profile.name,
-                    scriptRelPath: resolveMainScript(generatedDataPath, appName, mainScript),
-                    pythonPath: getProfilePythonPath(config.profiles, profile),
-                    appVersion: readPreparedAppVersion(generatedDataPath, appName),
-                    admin: getProfileValue(config.profiles, profile, 'admin') === true,
-                    usePythonw: getProfileValue(config.profiles, profile, 'use_pythonw') === true,
-                });
+                const runCmdName = `${appName}.cmd`;
+                const updaterIssue = packageZipUpdater ? checkUpdaterSupport(generatedDataPath, appName) : '';
+                const withUpdater = packageZipUpdater && !updaterIssue;
+                if (updaterIssue) core.warning(`Skipping ${getUpdaterCmdName(appName)}: ${updaterIssue}.`);
+                const cmdFiles = [{
+                    name: runCmdName,
+                    content: buildRunCmd({
+                        appName,
+                        profileName: profile.name,
+                        scriptRelPath: resolveMainScript(generatedDataPath, appName, mainScript),
+                        pythonPath: getProfilePythonPath(config.profiles, profile),
+                        // With the updater the version changes after packaging, so pyappify reads it from the repo.
+                        appVersion: withUpdater ? '' : readPreparedAppVersion(generatedDataPath, appName),
+                        admin: getProfileValue(config.profiles, profile, 'admin') === true,
+                        usePythonw: getProfileValue(config.profiles, profile, 'use_pythonw') === true,
+                    }),
+                }];
+                if (withUpdater) {
+                    cmdFiles.push({
+                        name: getUpdaterCmdName(appName),
+                        content: buildUpdaterCmd({ appName, profileName: profile.name, runCmdName }),
+                    });
+                }
                 const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
                 if (packageFormat === '7z') {
-                    await create7zPackage(exec.exec, sevenZip, distDir, appName, cmdContent, packagePath);
+                    await create7zPackage(exec.exec, sevenZip, distDir, appName, cmdFiles, packagePath);
                 } else {
-                    await createZipPackage(archiver, generatedDataPath, cmdContent, packagePath, appName);
+                    await createZipPackage(archiver, generatedDataPath, cmdFiles, packagePath, appName);
                 }
                 core.info(`Created ${packageFormat} package ${packagePath}`);
             }

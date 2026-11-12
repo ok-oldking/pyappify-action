@@ -11,13 +11,14 @@ const defaults = Object.fromEntries(Object.entries(
     yaml.load(fs.readFileSync(path.join(__dirname, 'action.yml'), 'utf8')).inputs,
 ).map(([name, input]) => [name, String(input.default ?? '')]));
 
-async function runAction(inputs = {}, cached = true) {
+async function runAction(inputs = {}, cached = true, { updaterReady = false } = {}) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pyappify-action-'));
     const previousDirectory = process.cwd();
     const buildDir = path.join(root, 'runner', 'p');
     const executable = path.join(buildDir, 'src-tauri', 'target', 'release', 'demo.exe');
     const commands = [];
     const failures = [];
+    const warnings = [];
     const outputs = {};
     const write = (file, text = 'fixture') => {
         fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -40,6 +41,12 @@ async function runAction(inputs = {}, cached = true) {
             write(path.join(app, 'app.json'), JSON.stringify({
                 installed: true, current_version: 'v2.0.0-beta.1',
             }));
+            if (updaterReady) {
+                const site = path.join(app, 'python', 'Lib', 'site-packages');
+                write(path.join(site, 'pyappify', 'updater_ui.py'));
+                write(path.join(site, 'dulwich', '__init__.py'));
+                write(path.join(app, 'repo', 'HEAD'));
+            }
         }
         return 0;
     };
@@ -49,6 +56,7 @@ async function runAction(inputs = {}, cached = true) {
             getInput: name => values[name] || '',
             getBooleanInput: name => String(values[name]) === 'true',
             info() {}, startGroup() {}, endGroup() {},
+            warning: message => warnings.push(message),
             setFailed: message => failures.push(message),
             setOutput: (name, value) => { outputs[name] = value; },
         },
@@ -80,7 +88,10 @@ async function runAction(inputs = {}, cached = true) {
             } },
         });
         const files = fs.existsSync('pyappify_dist') ? fs.readdirSync('pyappify_dist') : [];
-        return { commands, failures, outputs, files };
+        // Zip entry names are stored uncompressed, so a byte search finds them.
+        const archives = Object.fromEntries(files.filter(file => file.endsWith('.zip'))
+            .map(file => [file, fs.readFileSync(path.join('pyappify_dist', file)).toString('latin1')]));
+        return { commands, failures, warnings, outputs, files, archives };
     } finally {
         process.chdir(previousDirectory);
         assert.ok(root.startsWith(path.join(os.tmpdir(), 'pyappify-action-')));
@@ -128,4 +139,26 @@ test('binary-only signing mode allows both outputs disabled, including a cached 
         assert.equal(result.commands.filter(command => command[2] === 'bundle').length, 0);
         assert.ok(result.files.every(file => file === 'demo'));
     }
+});
+
+test('archives get an updater cmd when the bundled python can run the update window', async () => {
+    const result = await runAction({ build_setup: false, package_zip: true }, true, { updaterReady: true });
+    assert.deepEqual(result.failures, []);
+    assert.deepEqual(result.warnings, []);
+    const archive = result.archives['demo-win32-Global.zip'];
+    assert.ok(archive.includes('demo/demo.cmd'));
+    assert.ok(archive.includes('demo/demo-updater.cmd'));
+});
+
+test('archives skip the updater cmd with a warning when pyappify is missing or it is disabled', async () => {
+    const missing = await runAction({ build_setup: false, package_zip: true });
+    assert.deepEqual(missing.failures, []);
+    assert.equal(missing.warnings.length, 2);
+    assert.match(missing.warnings[0], /demo-updater\.cmd.*pyappify/);
+    assert.ok(!missing.archives['demo-win32-China.zip'].includes('demo-updater.cmd'));
+
+    const disabled = await runAction({ build_setup: false, package_zip: true, package_zip_updater: false });
+    assert.deepEqual(disabled.warnings, []);
+    assert.ok(disabled.archives['demo-win32-China.zip'].includes('demo/demo.cmd'));
+    assert.ok(!disabled.archives['demo-win32-China.zip'].includes('demo-updater.cmd'));
 });

@@ -44,6 +44,12 @@ inputs:
     required: false
     default: '7z'
 
+  package_zip_updater:
+    description: if enabled, each package_zip archive also gets a <app name>-updater.cmd that opens the pyappify update window (pick a version, read its notes, choose the pip mirror, update and restart the app). Needs the app to depend on pyappify[standalone] 1.0.20 or newer (Python 3.10+); otherwise it is skipped with a warning
+    required: false
+    type: boolean
+    default: true
+
 outputs:
   dist-path:
     description: The path to the directory containing the zipped application bundles.
