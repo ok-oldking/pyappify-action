@@ -153,4 +153,4 @@ async function trimRepo(exec, repoDir, keep, log = () => {}) {
     return { trimmed: true, kept: [...keptSet], sizeBefore, sizeAfter };
 }
 
-module.exports = { findShallowRoots, getKeepReleases, selectKeptTags, trimRepo };
+module.exports = { compareKeys, findShallowRoots, getKeepReleases, selectKeptTags, trimRepo, versionKey };

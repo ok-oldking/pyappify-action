@@ -11,6 +11,7 @@ const http = require('@actions/http-client');
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require('./build-config');
 const { getSetupVersion, setupProfile } = require('./setup-profile');
 const { getKeepReleases, trimRepo } = require('./trim-repo');
+const { buildReleaseNotes } = require('./release-notes');
 const {
     buildRunCmd,
     buildUpdaterCmd,
@@ -332,6 +333,7 @@ async function run() {
         core.info(`read profiles ${config.profiles}`);
 
         const tauriDataPath = path.join(buildDir, 'src-tauri', 'data');
+        let releaseNotes = null;
         if (buildSetup) {
             core.startGroup('Creating online installer');
             await removeIfExists(tauriDataPath);
@@ -362,6 +364,13 @@ async function run() {
                 core.info(`Removed ${removed} __pycache__ folders from ${generatedDataPath}`);
             }
             const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
+            // Read before trimming, which drops the older tags the notes look back to.
+            const preparedVersion = readPreparedAppVersion(generatedDataPath, appName);
+            if (!releaseNotes && preparedVersion && fs.existsSync(bundledRepoPath)) {
+                releaseNotes = await buildReleaseNotes(exec.exec, bundledRepoPath, preparedVersion);
+                core.info(`Release notes for ${preparedVersion} from ${releaseNotes.source}` +
+                    (releaseNotes.previous ? ` since ${releaseNotes.previous}` : ''));
+            }
             if (keepReleases && fs.existsSync(bundledRepoPath)) {
                 await trimRepo(exec.exec, bundledRepoPath, keepReleases, message => core.info(message));
             }
@@ -435,6 +444,12 @@ async function run() {
         await removeIfExists(appDistDir);
         core.info(`deleting ${appDistDir}`);
         core.endGroup();
+
+        // Outside distDir, so a release step uploading pyappify_dist/* does not attach it.
+        const releaseNotesPath = 'pyappify_release_notes.md';
+        fs.writeFileSync(releaseNotesPath, releaseNotes ? releaseNotes.notes : '');
+        core.setOutput('release-notes', releaseNotes ? releaseNotes.notes : '');
+        core.setOutput('release-notes-path', releaseNotesPath);
 
         const releaseFiles = fs.readdirSync(distDir).map(f => path.join(distDir, f));
         const assets = releaseFiles.join('\n')

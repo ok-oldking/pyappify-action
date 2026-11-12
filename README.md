@@ -8,7 +8,7 @@ This action packages your project with [PyAppify](https://github.com/ok-oldking/
 
 - **No freezing.** Your code runs as normal Python in a real venv. Any library works without hooks or hidden-import lists.
 - **Antivirus friendly.** A small launcher plus an NSIS installer, not one large self-extracting exe.
-- **Built-in updates.** Installed apps update from your repo's tags, with release notes generated from the commits.
+- **Built-in updates.** Installed apps update from your repo's tags. Update and release notes come from your `CHANGELOG.md`, or from the commit messages when it has no entry.
 - **Multiple profiles.** Ship variants such as `release`/`debug` or `cpu`/`cuda`, each with its own entry script, dependencies and settings.
 
 > Windows only for now (`runs-on: windows-latest`).
@@ -77,6 +77,7 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: pyappify_release_notes.md   # CHANGELOG.md entry, or commit messages
           files: pyappify_dist/*
 ```
 
@@ -169,6 +170,19 @@ When the updater cmd is included, `my-app.cmd` no longer hardcodes the packaged 
 | `pyappify-assets` | Newline-separated list of the generated files. |
 | `exe-path` | Launcher exe path (with `build_exe_only`). |
 | `exe-folder` | Folder containing the launcher exe (with `build_exe_only`). |
+| `release-notes` | Markdown notes for the packaged version ([release notes](#release-notes)). |
+| `release-notes-path` | `pyappify_release_notes.md`, the same notes as a file for `body_path`. |
+
+### Release notes
+
+The action writes notes for the packaged version to `pyappify_release_notes.md`, the same way the PyAppify launcher and the update window build update notes:
+
+- If `CHANGELOG.md` at that tag has an entry for the version, the notes are its entry, plus the entries of the prereleases since the previous release, repeated notes once.
+- Otherwise they are the commit subjects since the previous version (the previous release for a release, the previous version tag for a prerelease), merges skipped.
+
+The changelog format is described in [PyAppify's update notes](https://github.com/ok-oldking/pyappify#update-notes): `## v1.4.0` starts a version (`[v1.4.0]`, `1.4.0` and a trailing date also work), `- ` starts a note and an indented line continues it. Localized `CHANGELOG.<language>.md` files are used by the launcher; the release notes use the English `CHANGELOG.md`.
+
+The file is written next to `pyappify_dist/`, not inside it, so `files: pyappify_dist/*` does not upload it. The notes are read from the bundled repo, so they are not written with `build_exe_only`.
 
 ## How it works
 

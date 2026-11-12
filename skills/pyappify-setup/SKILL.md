@@ -178,6 +178,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          body_path: pyappify_release_notes.md # CHANGELOG.md entry, else commit messages
           files: pyappify_dist/*
 ```
 

@@ -63,6 +63,12 @@ outputs:
   exe-folder:
     description: The tauri exe's folder location
 
+  release-notes:
+    description: Markdown notes for the packaged version. The version's CHANGELOG.md entry (merged with the prereleases since the previous release) when it has one, otherwise the commit subjects since the previous version.
+
+  release-notes-path:
+    description: Path of pyappify_release_notes.md holding release-notes, for the release step's body_path. Written outside pyappify_dist so it is not uploaded as an asset.
+
 runs:
   using: 'node20'
   main: 'dist/index.js'

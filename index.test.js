@@ -162,3 +162,14 @@ test('archives skip the updater cmd with a warning when pyappify is missing or i
     assert.ok(disabled.archives['demo-win32-China.zip'].includes('demo/demo.cmd'));
     assert.ok(!disabled.archives['demo-win32-China.zip'].includes('demo-updater.cmd'));
 });
+
+test('writes release notes once from the bundled repo, outside the dist folder', async () => {
+    const result = await runAction({ package_zip: true }, true, { updaterReady: true });
+    assert.deepEqual(result.failures, []);
+    assert.equal(result.outputs['release-notes-path'], 'pyappify_release_notes.md');
+    assert.equal(result.outputs['release-notes'], '');
+    assert.ok(!result.files.includes('pyappify_release_notes.md'));
+    const shows = result.commands.filter(command => command[0] === 'git' && command.includes('show'));
+    assert.equal(shows.length, 1);
+    assert.equal(shows[0].at(-1), 'v2.0.0-beta.1:CHANGELOG.md');
+});
