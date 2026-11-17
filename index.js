@@ -9,8 +9,9 @@ const path = require('path');
 const archiver = require('archiver');
 const http = require('@actions/http-client');
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require('./build-config');
-const { getSetupVersion, setupProfile } = require('./setup-profile');
+const { getSetupVersion, setupProfile, withPersistentCache } = require('./setup-profile');
 const { getKeepReleases, trimRepo } = require('./trim-repo');
+const { getExtraFiles, placeExtraFiles } = require('./extra-files');
 const { buildLocalSetupConfig, createSourceSnapshot, hasGitSource, stripGitSource, usesLocalSource } = require('./local-source');
 const { RECENT_COMMITS, SHORT_HASH_LENGTH, buildReleaseNotes, recentCommitNotes } = require('./release-notes');
 const { changelogVersion, isVersionTag, sortVersionTags } = require('./versions');
@@ -411,7 +412,9 @@ async function run() {
             const setupConfigPath = path.join(appDistDir, configFile);
             if (localSource) fs.writeFileSync(setupConfigPath, yaml.dump(buildLocalSetupConfig(config, snapshotDir)));
             try {
-                await setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion);
+                // pip's downloads stay in the build folder, which local runs reuse.
+                await withPersistentCache(path.join(buildDir, 'cache'), appDistDir, () =>
+                    setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion));
             } finally {
                 fs.rmSync(setupConfigPath, { force: true });
             }
@@ -425,6 +428,13 @@ async function run() {
             }
             const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
             if (localSource) await detachLocalSource(generatedDataPath, appName, bundledRepoPath);
+            const extraFiles = getExtraFiles(config.profiles, profile);
+            if (extraFiles.length) {
+                const workingPath = path.join(generatedDataPath, 'apps', appName, 'working');
+                const placed = placeExtraFiles('.', workingPath, extraFiles);
+                core.info(`Added extra_files ${extraFiles.join(', ')} to ${workingPath}: ` +
+                    `${placed.files} files, ${(placed.bytes / 1024 ** 3).toFixed(2)} GB.`);
+            }
             // Read before trimming, which drops the older tags the notes look back to.
             const preparedVersion = readPreparedAppVersion(generatedDataPath, appName);
             if (!releaseNotes && fs.existsSync(bundledRepoPath)) {
@@ -471,7 +481,9 @@ async function run() {
                 }
                 const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
                 // Archives run the app from working, so a local snapshot's repo stays out of them.
-                const stashedRepoPath = path.join(workDir, `pyappify_repo_stash_${appName}`);
+                // Next to the app folder, so the move is a rename on the same drive (a temp dir on
+                // another drive fails with EXDEV), yet outside what the archive packs.
+                const stashedRepoPath = path.join(distDir, `.repo_stash_${appName}`);
                 const stashRepo = localSource && fs.existsSync(bundledRepoPath);
                 if (stashRepo) {
                     await removeIfExists(stashedRepoPath);

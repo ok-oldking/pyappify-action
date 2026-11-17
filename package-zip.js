@@ -187,6 +187,16 @@ function readPreparedAppVersion(dataDir, appName) {
     }
 }
 
+// Model weights and archives barely compress: stored as is, they zip many times faster.
+const STORED_EXTENSIONS = new Set([
+    '.pth', '.pt', '.bin', '.safetensors', '.ckpt', '.onnx', '.gguf', '.npz',
+    '.zip', '.7z', '.gz', '.xz', '.bz2', '.zst', '.whl',
+]);
+
+function isStoredInZip(name) {
+    return STORED_EXTENSIONS.has(path.extname(name).toLowerCase());
+}
+
 // cmdFiles: [{ name, content }] written next to data in the package root.
 function createZipPackage(archiver, dataDir, cmdFiles, zipFilePath, appName) {
     return new Promise((resolve, reject) => {
@@ -196,7 +206,7 @@ function createZipPackage(archiver, dataDir, cmdFiles, zipFilePath, appName) {
         output.on('error', reject);
         archive.on('error', reject);
         archive.pipe(output);
-        archive.directory(dataDir, `${appName}/data`);
+        archive.directory(dataDir, `${appName}/data`, entry => (isStoredInZip(entry.name) ? { ...entry, store: true } : entry));
         for (const { name, content } of cmdFiles) archive.append(content, { name: `${appName}/${name}` });
         archive.finalize();
     });
@@ -234,6 +244,7 @@ module.exports = {
     getProfileValue,
     getUpdaterCmdName,
     getZipPackageFileName,
+    isStoredInZip,
     removePycache,
     readPreparedAppVersion,
     resolveMainScript,

@@ -131,6 +131,7 @@ Profile keys:
 | `admin` | `true` runs the app elevated (UAC prompt). |
 | `use_pythonw` | `true` runs with `pythonw.exe`, so no console window opens. |
 | `show_add_defender` | `true` makes the launcher offer to add a Windows Defender exclusion. |
+| `extra_files` | Paths in the app directory, such as `["checkpoints"]`, put into offline installers and archives as is, outside git. See [extra files](#extra-files). |
 
 ## Action inputs
 
@@ -164,6 +165,23 @@ Compared with a `git_url` build:
 - Archives contain no repo and no updater cmd.
 - Installed apps get no updates. Ship a new installer or archive instead.
 - `keep_releases` is ignored.
+
+### Extra files
+
+Some apps need large files that do not belong in git, such as model weights. List them under a profile's `extra_files`, as paths relative to the app directory (the folder holding `pyappify.yml`). They may be git-ignored:
+
+```yaml
+profiles:
+  - name: "release"
+    main_script: "webui.py"
+    requires_python: "3.11"
+    requirements: ".[webui]"
+    extra_files: ["checkpoints"]   # downloaded into the app folder before building
+```
+
+After each profile is set up, the action puts these files and folders into the prepared app's working directory at the same paths, so the app finds them where it did in your checkout. They go into that profile's offline installer and archive, never into a git repository, and updates leave them in place. Download them in an earlier workflow step (or before a local build). Like other profile keys, `extra_files` is inherited from the first profile. Files are hard-linked when they are on the same drive, so even gigabytes take no extra space during the build.
+
+Zip archives store model weights (`.pth`, `.pt`, `.bin`, `.safetensors`, `.onnx`, ...) without compressing them, since they hardly compress. NSIS installers cannot hold more than 2 GB, so ship larger apps as archives (`build_setup: false`, `package_zip: true`).
 
 ### Portable updates
 
@@ -231,7 +249,8 @@ node local.js --app-dir ../my-app --version v1.2.4 --package_zip true
 
 Differences from a workflow run:
 
-- PyAppify is cloned and built in `p/` inside your app folder. Later runs reuse the compiled launcher in `p/`; delete the folder to rebuild it, for example after changing `version`, `uac` or `icons/`. Add `p/`, `pyappify_dist/` and `pyappify_release_notes.md` to your `.gitignore`.
+- PyAppify is cloned and built in `p/` inside your app folder. Later runs reuse the compiled launcher in `p/`; delete the folder to rebuild it, for example after changing `version`, `uac` or `icons/`.
+- pip's download cache is kept in `p/cache`, so later runs, and later profiles in the same run, install from it instead of downloading every package again. Delete `p/cache` to free the space. Add `p/`, `pyappify_dist/` and `pyappify_release_notes.md` to your `.gitignore`.
 - There is no workflow tag, so without `app_version` the launcher prepares your latest stable tag, and `add_version_name` names files after the newest version tag reachable from your checkout (or its short commit hash without one). Set `--app_version v1.4.0` to package an exact tag. The launcher clones your app from `git_url`, so that tag must be pushed. To package your working files without pushing anything, pass `--use_git_url false`, or leave `git_url` out. See [packaging without a git repo](#packaging-without-a-git-repo).
 - Outputs are printed as `::set-output` lines instead of being passed to later steps. Nothing is uploaded or released.
 

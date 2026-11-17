@@ -13,6 +13,7 @@ const {
     getProfilePythonPath,
     getProfileValue,
     getZipPackageFileName,
+    isStoredInZip,
     removePycache,
     resolveMainScript,
 } = require('./package-zip');
@@ -21,6 +22,13 @@ test('zip package name includes profile, optional version and format', () => {
     assert.strictEqual(getZipPackageFileName('app', 'win32', 'release'), 'app-win32-release.zip');
     assert.strictEqual(getZipPackageFileName('app', 'win32', 'release', 'v1.2.0'), 'app-win32-release-1.2.0.zip');
     assert.strictEqual(getZipPackageFileName('app', 'win32', 'release', 'v1.2.0', '7z'), 'app-win32-release-1.2.0.7z');
+});
+
+test('zip stores model weights and archives as is', () => {
+    assert.ok(isStoredInZip('checkpoints/gpt.pth'));
+    assert.ok(isStoredInZip('w2v/MODEL.SAFETENSORS'));
+    assert.ok(!isStoredInZip('app/main.py'));
+    assert.ok(!isStoredInZip('python/torch_cuda.dll'));
 });
 
 test('package format defaults to 7z and rejects unknown values', () => {

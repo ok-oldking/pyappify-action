@@ -49,3 +49,30 @@ test('keeps latest stable setup when no application tag is specified', async () 
     await setupProfile(async (...args) => calls.push(args), 'app.exe', 'China', 'example', 'unused', '');
     assert.deepEqual(calls, [[path.resolve('app.exe'), ['-c', 'setup', '-p', 'China'], { cwd: 'unused' }]]);
 });
+
+test('the launcher cache is lent from the persistent folder and returned, even on failure', async () => {
+    const { withPersistentCache } = require('./setup-profile');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pcache-'));
+    const persistent = path.join(root, 'p', 'cache');
+    const dist = path.join(root, 'dist', 'app');
+    fs.mkdirSync(path.join(persistent, 'pip'), { recursive: true });
+    fs.writeFileSync(path.join(persistent, 'pip', 'torch.whl'), 'wheel');
+    fs.mkdirSync(dist, { recursive: true });
+    await withPersistentCache(persistent, dist, async () => {
+        assert.strictEqual(fs.readFileSync(path.join(dist, 'cache', 'pip', 'torch.whl'), 'utf8'), 'wheel');
+        assert.ok(!fs.existsSync(persistent));
+        fs.writeFileSync(path.join(dist, 'cache', 'pip', 'numpy.whl'), 'new');
+    });
+    assert.deepStrictEqual(fs.readdirSync(path.join(persistent, 'pip')).sort(), ['numpy.whl', 'torch.whl']);
+    assert.ok(!fs.existsSync(path.join(dist, 'cache')));
+    await assert.rejects(withPersistentCache(persistent, dist, async () => { throw new Error('setup failed'); }), /setup failed/);
+    assert.ok(fs.existsSync(path.join(persistent, 'pip', 'torch.whl')), 'kept after a failed setup');
+    // First run: no persistent cache yet, the launcher's new one is kept.
+    const fresh = path.join(root, 'p2', 'cache');
+    await withPersistentCache(fresh, dist, async () => {
+        fs.mkdirSync(path.join(dist, 'cache', 'pip'), { recursive: true });
+        fs.writeFileSync(path.join(dist, 'cache', 'pip', 'a.whl'), 'a');
+    });
+    assert.ok(fs.existsSync(path.join(fresh, 'pip', 'a.whl')));
+    fs.rmSync(root, { recursive: true, force: true });
+});

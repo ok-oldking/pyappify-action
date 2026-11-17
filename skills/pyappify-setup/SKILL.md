@@ -51,6 +51,7 @@ Gather these facts silently (read files, run read-only git commands):
 | Git URL | `git remote get-url origin`. Convert SSH (`git@github.com:o/r.git`) to HTTPS (`https://github.com/o/r.git`). The end user's launcher clones this, so it must be **publicly readable over HTTPS**. No remote, or a private one → packaging from local files is the only option that works. |
 | Tags | `git tag --sort=-v:refname`. Note whether version tags exist (`v1.2.3`, `1.2`, `release-1.2.0`, `1.2.3rc1` ...; a single number needs a `v`). |
 | Icons | `icons/icon.ico` and `icons/icon.png` in the repo root? |
+| Large data | Git-ignored folders the app needs at run time (model weights such as `checkpoints/`, downloaded assets). Candidates for `extra_files`; note how they are downloaded (e.g. `modelscope download ...`). |
 | Default branch | `git symbolic-ref refs/remotes/origin/HEAD` or `git branch --show-current`. |
 | Local build tools | Only matters for a local build, on Windows: `node --version` (20+), `git --version`, `cargo --version` (Rust), and `7z` on PATH or in `C:\Program Files\7-Zip` for 7z archives. The Visual Studio C++ build tools cannot be checked reliably; mention them. Do not install anything yourself. |
 | Launcher version | Newest tag at https://github.com/ok-oldking/pyappify/tags if you can check it. Packaging local files needs one newer than v1.2.7. |
@@ -124,6 +125,7 @@ Profile keys:
 | `admin` | `true` → start the Python process elevated (UAC prompt). Default `false`. |
 | `use_pythonw` | `true` → run with `pythonw.exe` (no console window). Default `false`. |
 | `show_add_defender` | `true` → launcher offers to add a Windows Defender exclusion. Default `false`. |
+| `extra_files` | List of paths relative to the app directory (often git-ignored data such as model weights, e.g. `["checkpoints"]`) put into the offline installers and archives at the same paths, outside git. The build must find them in the app directory: download them before the build. Updates keep them. Installers are limited to 2 GB, so large data needs `package_zip: true` and `build_setup: false`. |
 
 Rules:
 
@@ -263,6 +265,7 @@ pyappify_release_notes.md
 
 How a local build differs from a GitHub build:
 
+- pip's downloads are cached in `p/cache` and reused by later runs and profiles.
 - The launcher is compiled in `p/` and reused. Delete `p/` to rebuild it after
   changing `version`, `uac` or `icons/`.
 - There is no workflow tag. With a git source, the launcher prepares the latest

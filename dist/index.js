@@ -54,6 +54,81 @@ module.exports = {
 
 /***/ }),
 
+/***/ 3008:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// extra_files: paths in the app directory (often git-ignored data such as model
+// weights) that are put into the prepared working folder as is, outside the
+// app's git repository. The launcher keeps untracked files in working across
+// updates, so they stay in place after an update.
+const fs = __nccwpck_require__(9896);
+const path = __nccwpck_require__(6928);
+const { getProfileValue } = __nccwpck_require__(4250);
+
+// The profile's extra_files (inherited from the first profile) as a list of
+// '/'-separated paths relative to appDir. Rejects paths outside appDir and
+// paths that do not exist.
+function getExtraFiles(profiles, profile, appDir = '.') {
+    const value = getProfileValue(profiles, profile, 'extra_files');
+    if (value === undefined || value === null || value === '') return [];
+    const list = Array.isArray(value) ? value : [value];
+    const root = path.resolve(appDir);
+    return list.map(entry => {
+        if (typeof entry !== 'string' || !entry.trim()) {
+            throw new Error(`extra_files of profile ${profile.name} must be a list of paths, got ${JSON.stringify(entry)}.`);
+        }
+        const resolved = path.resolve(root, entry.trim());
+        const relative = path.relative(root, resolved);
+        if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+            throw new Error(`extra_files entry '${entry}' must be inside the app directory.`);
+        }
+        if (!fs.existsSync(resolved)) {
+            throw new Error(`extra_files entry '${entry}' does not exist in ${root}.`);
+        }
+        return relative.split(path.sep).join('/');
+    });
+}
+
+// Hard-links (or copies, across volumes) one file over target.
+function placeFile(source, target, stats) {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.rmSync(target, { force: true });
+    try {
+        fs.linkSync(source, target);
+    } catch {
+        fs.copyFileSync(source, target);
+    }
+    stats.files++;
+    stats.bytes += fs.statSync(source).size;
+}
+
+function placeTree(source, target, stats) {
+    const entry = fs.statSync(source);
+    if (entry.isDirectory()) {
+        for (const child of fs.readdirSync(source)) {
+            placeTree(path.join(source, child), path.join(target, child), stats);
+        }
+    } else if (entry.isFile()) {
+        placeFile(source, target, stats);
+    }
+}
+
+// Puts every entry of extraFiles from appDir into workingDir at the same
+// relative path. Files are hard-linked when possible, so large models are
+// not copied. Returns { files, bytes }.
+function placeExtraFiles(appDir, workingDir, extraFiles) {
+    const stats = { files: 0, bytes: 0 };
+    for (const entry of extraFiles) {
+        placeTree(path.join(appDir, entry), path.join(workingDir, entry), stats);
+    }
+    return stats;
+}
+
+module.exports = { getExtraFiles, placeExtraFiles };
+
+
+/***/ }),
+
 /***/ 2285:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -62229,6 +62304,16 @@ function readPreparedAppVersion(dataDir, appName) {
     }
 }
 
+// Model weights and archives barely compress: stored as is, they zip many times faster.
+const STORED_EXTENSIONS = new Set([
+    '.pth', '.pt', '.bin', '.safetensors', '.ckpt', '.onnx', '.gguf', '.npz',
+    '.zip', '.7z', '.gz', '.xz', '.bz2', '.zst', '.whl',
+]);
+
+function isStoredInZip(name) {
+    return STORED_EXTENSIONS.has(path.extname(name).toLowerCase());
+}
+
 // cmdFiles: [{ name, content }] written next to data in the package root.
 function createZipPackage(archiver, dataDir, cmdFiles, zipFilePath, appName) {
     return new Promise((resolve, reject) => {
@@ -62238,7 +62323,7 @@ function createZipPackage(archiver, dataDir, cmdFiles, zipFilePath, appName) {
         output.on('error', reject);
         archive.on('error', reject);
         archive.pipe(output);
-        archive.directory(dataDir, `${appName}/data`);
+        archive.directory(dataDir, `${appName}/data`, entry => (isStoredInZip(entry.name) ? { ...entry, store: true } : entry));
         for (const { name, content } of cmdFiles) archive.append(content, { name: `${appName}/${name}` });
         archive.finalize();
     });
@@ -62276,6 +62361,7 @@ module.exports = {
     getProfileValue,
     getUpdaterCmdName,
     getZipPackageFileName,
+    isStoredInZip,
     removePycache,
     readPreparedAppVersion,
     resolveMainScript,
@@ -62463,7 +62549,33 @@ async function setupProfile(exec, executable, profile, appName, appDistDir, vers
     }
 }
 
-module.exports = { getSetupVersion, setupProfile };
+// Moves a directory, copying when it crosses drives (rename fails with EXDEV).
+function moveDir(from, to) {
+    fs.rmSync(to, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    try {
+        fs.renameSync(from, to);
+    } catch (error) {
+        if (error.code !== 'EXDEV') throw error;
+        fs.cpSync(from, to, { recursive: true });
+        fs.rmSync(from, { recursive: true, force: true });
+    }
+}
+
+// The launcher keeps pip's download cache in <appDistDir>/cache, which is
+// deleted after every profile. Lending it a persistent cache for the setup
+// lets later profiles and later local builds reuse the downloads.
+async function withPersistentCache(persistentDir, appDistDir, run) {
+    const launcherCache = path.join(appDistDir, 'cache');
+    if (persistentDir && fs.existsSync(persistentDir)) moveDir(persistentDir, launcherCache);
+    try {
+        return await run();
+    } finally {
+        if (persistentDir && fs.existsSync(launcherCache)) moveDir(launcherCache, persistentDir);
+    }
+}
+
+module.exports = { getSetupVersion, moveDir, setupProfile, withPersistentCache };
 
 
 /***/ }),
@@ -72900,8 +73012,9 @@ const path = __nccwpck_require__(6928);
 const archiver = __nccwpck_require__(9392);
 const http = __nccwpck_require__(4844);
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = __nccwpck_require__(7299);
-const { getSetupVersion, setupProfile } = __nccwpck_require__(453);
+const { getSetupVersion, setupProfile, withPersistentCache } = __nccwpck_require__(453);
 const { getKeepReleases, trimRepo } = __nccwpck_require__(9631);
+const { getExtraFiles, placeExtraFiles } = __nccwpck_require__(3008);
 const { buildLocalSetupConfig, createSourceSnapshot, hasGitSource, stripGitSource, usesLocalSource } = __nccwpck_require__(2285);
 const { RECENT_COMMITS, SHORT_HASH_LENGTH, buildReleaseNotes, recentCommitNotes } = __nccwpck_require__(6521);
 const { changelogVersion, isVersionTag, sortVersionTags } = __nccwpck_require__(3547);
@@ -73302,7 +73415,9 @@ async function run() {
             const setupConfigPath = path.join(appDistDir, configFile);
             if (localSource) fs.writeFileSync(setupConfigPath, yaml.dump(buildLocalSetupConfig(config, snapshotDir)));
             try {
-                await setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion);
+                // pip's downloads stay in the build folder, which local runs reuse.
+                await withPersistentCache(path.join(buildDir, 'cache'), appDistDir, () =>
+                    setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion));
             } finally {
                 fs.rmSync(setupConfigPath, { force: true });
             }
@@ -73316,6 +73431,13 @@ async function run() {
             }
             const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
             if (localSource) await detachLocalSource(generatedDataPath, appName, bundledRepoPath);
+            const extraFiles = getExtraFiles(config.profiles, profile);
+            if (extraFiles.length) {
+                const workingPath = path.join(generatedDataPath, 'apps', appName, 'working');
+                const placed = placeExtraFiles('.', workingPath, extraFiles);
+                core.info(`Added extra_files ${extraFiles.join(', ')} to ${workingPath}: ` +
+                    `${placed.files} files, ${(placed.bytes / 1024 ** 3).toFixed(2)} GB.`);
+            }
             // Read before trimming, which drops the older tags the notes look back to.
             const preparedVersion = readPreparedAppVersion(generatedDataPath, appName);
             if (!releaseNotes && fs.existsSync(bundledRepoPath)) {
@@ -73362,7 +73484,9 @@ async function run() {
                 }
                 const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
                 // Archives run the app from working, so a local snapshot's repo stays out of them.
-                const stashedRepoPath = path.join(workDir, `pyappify_repo_stash_${appName}`);
+                // Next to the app folder, so the move is a rename on the same drive (a temp dir on
+                // another drive fails with EXDEV), yet outside what the archive packs.
+                const stashedRepoPath = path.join(distDir, `.repo_stash_${appName}`);
                 const stashRepo = localSource && fs.existsSync(bundledRepoPath);
                 if (stashRepo) {
                     await removeIfExists(stashedRepoPath);
