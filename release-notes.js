@@ -1,17 +1,13 @@
 // Release notes for the packaged app version, like the update notes of the
 // PyAppify launcher and pyappify-python: the app's CHANGELOG.md entries when the
 // version has one, otherwise the commit messages since the previous version.
-const { compareKeys, versionKey } = require('./trim-repo');
+const { changelogVersion, compareKeys, isReleaseKey, versionKey } = require('./versions');
 
 const CHANGELOG_FILE = 'CHANGELOG.md';
 const MAX_COMMIT_LINES = 50;
-
-// `[v1.3.0]` and `1.3.0` both name the tag `v1.3.0`: compare without them.
-function changelogVersion(version) {
-    let text = String(version).trim().replace(/^\[+|\]+$/g, '').trim();
-    if (/^[vV]\d/.test(text)) text = text.slice(1);
-    return text;
-}
+// Without version tags, an app's versions are its most recent commits, named by short hash.
+const RECENT_COMMITS = 30;
+const SHORT_HASH_LENGTH = 7;
 
 // { version: [note, ...] } for each `## <version>` section, parsed as the launcher does:
 // `- ` or `* ` starts a note, an indented line continues it, everything else is ignored.
@@ -47,7 +43,7 @@ function parseChangelog(text) {
 function versionsSince(tags, version) {
     const target = versionKey(version);
     if (!target) return { versions: [version], previous: '' };
-    const releaseOnly = target[3] === 3;
+    const releaseOnly = isReleaseKey(target);
     const sorted = tags
         .map(tag => ({ tag, key: versionKey(tag) }))
         .filter(item => item.key && compareKeys(item.key, target) <= 0)
@@ -56,7 +52,7 @@ function versionsSince(tags, version) {
     let previous = '';
     for (const { tag, key } of sorted) {
         if (compareKeys(key, target) === 0) continue;
-        if (releaseOnly && key[3] !== 3) {
+        if (releaseOnly && !isReleaseKey(key)) {
             versions.push(tag);
             continue;
         }
@@ -119,9 +115,27 @@ async function buildReleaseNotes(exec, repoDir, version) {
     return { source: 'commits', previous, notes: formatNotes(commitNotes(log || '')) };
 }
 
+// Notes for an app without version tags, whose versions are its commits (as in the
+// launcher): the `count` most recent commits at HEAD, `- <short hash> <subject>`.
+async function recentCommitNotes(exec, repoDir, count = RECENT_COMMITS) {
+    let stdout = '';
+    const code = await exec('git', [
+        '-C', repoDir, 'log', `-${count}`, `--format=%h %s`, `--abbrev=${SHORT_HASH_LENGTH}`, 'HEAD',
+    ], {
+        silent: true,
+        ignoreReturnCode: true,
+        listeners: { stdout: data => (stdout += data.toString()) },
+    });
+    const lines = code === 0 ? stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean) : [];
+    return { source: 'recent commits', previous: '', notes: formatNotes(lines) };
+}
+
 module.exports = {
     CHANGELOG_FILE,
+    RECENT_COMMITS,
+    SHORT_HASH_LENGTH,
     buildReleaseNotes,
+    recentCommitNotes,
     changelogNotes,
     changelogVersion,
     commitNotes,

@@ -62151,17 +62151,13 @@ module.exports = {
 // Release notes for the packaged app version, like the update notes of the
 // PyAppify launcher and pyappify-python: the app's CHANGELOG.md entries when the
 // version has one, otherwise the commit messages since the previous version.
-const { compareKeys, versionKey } = __nccwpck_require__(9631);
+const { changelogVersion, compareKeys, isReleaseKey, versionKey } = __nccwpck_require__(3547);
 
 const CHANGELOG_FILE = 'CHANGELOG.md';
 const MAX_COMMIT_LINES = 50;
-
-// `[v1.3.0]` and `1.3.0` both name the tag `v1.3.0`: compare without them.
-function changelogVersion(version) {
-    let text = String(version).trim().replace(/^\[+|\]+$/g, '').trim();
-    if (/^[vV]\d/.test(text)) text = text.slice(1);
-    return text;
-}
+// Without version tags, an app's versions are its most recent commits, named by short hash.
+const RECENT_COMMITS = 30;
+const SHORT_HASH_LENGTH = 7;
 
 // { version: [note, ...] } for each `## <version>` section, parsed as the launcher does:
 // `- ` or `* ` starts a note, an indented line continues it, everything else is ignored.
@@ -62197,7 +62193,7 @@ function parseChangelog(text) {
 function versionsSince(tags, version) {
     const target = versionKey(version);
     if (!target) return { versions: [version], previous: '' };
-    const releaseOnly = target[3] === 3;
+    const releaseOnly = isReleaseKey(target);
     const sorted = tags
         .map(tag => ({ tag, key: versionKey(tag) }))
         .filter(item => item.key && compareKeys(item.key, target) <= 0)
@@ -62206,7 +62202,7 @@ function versionsSince(tags, version) {
     let previous = '';
     for (const { tag, key } of sorted) {
         if (compareKeys(key, target) === 0) continue;
-        if (releaseOnly && key[3] !== 3) {
+        if (releaseOnly && !isReleaseKey(key)) {
             versions.push(tag);
             continue;
         }
@@ -62269,9 +62265,27 @@ async function buildReleaseNotes(exec, repoDir, version) {
     return { source: 'commits', previous, notes: formatNotes(commitNotes(log || '')) };
 }
 
+// Notes for an app without version tags, whose versions are its commits (as in the
+// launcher): the `count` most recent commits at HEAD, `- <short hash> <subject>`.
+async function recentCommitNotes(exec, repoDir, count = RECENT_COMMITS) {
+    let stdout = '';
+    const code = await exec('git', [
+        '-C', repoDir, 'log', `-${count}`, `--format=%h %s`, `--abbrev=${SHORT_HASH_LENGTH}`, 'HEAD',
+    ], {
+        silent: true,
+        ignoreReturnCode: true,
+        listeners: { stdout: data => (stdout += data.toString()) },
+    });
+    const lines = code === 0 ? stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean) : [];
+    return { source: 'recent commits', previous: '', notes: formatNotes(lines) };
+}
+
 module.exports = {
     CHANGELOG_FILE,
+    RECENT_COMMITS,
+    SHORT_HASH_LENGTH,
     buildReleaseNotes,
+    recentCommitNotes,
     changelogNotes,
     changelogVersion,
     commitNotes,
@@ -62324,30 +62338,9 @@ module.exports = { getSetupVersion, setupProfile };
 const fs = __nccwpck_require__(9896);
 const path = __nccwpck_require__(6928);
 
-// Same tag format and ordering as the launcher (src-tauri/src/git.rs).
-const VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:(?:-|\.)(alpha|beta|rc)(?:\.(\d+))?)?$/;
-const PRERELEASE_RANK = { alpha: 0, beta: 1, rc: 2 };
-const RELEASE_RANK = 3;
+const { compareKeys, isReleaseKey, versionKey } = __nccwpck_require__(3547);
+
 const KEEP_RELEASES_CONFIG_KEY = 'pyappify.keepreleases';
-
-function versionKey(tag) {
-    const match = VERSION_RE.exec(tag);
-    if (!match) return null;
-    return [
-        Number(match[1]),
-        Number(match[2]),
-        Number(match[3]),
-        match[4] ? PRERELEASE_RANK[match[4]] : RELEASE_RANK,
-        match[5] === undefined ? -1 : Number(match[5]),
-    ];
-}
-
-function compareKeys(a, b) {
-    for (let i = 0; i < a.length; i++) {
-        if (a[i] !== b[i]) return a[i] - b[i];
-    }
-    return 0;
-}
 
 // The `keep` newest releases and the prereleases newer than the oldest of
 // them, newest first. With fewer releases than `keep`, every version tag.
@@ -62355,12 +62348,12 @@ function selectKeptTags(tags, keep) {
     const versions = tags
         .map(tag => ({ tag, key: versionKey(tag) }))
         .filter(item => item.key)
-        .sort((a, b) => compareKeys(b.key, a.key));
+        .sort((a, b) => compareKeys(b.key, a.key) || (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0));
     const kept = [];
     let releases = 0;
     for (const { tag, key } of versions) {
         if (releases >= keep) break;
-        if (key[3] === RELEASE_RANK) releases++;
+        if (isReleaseKey(key)) releases++;
         kept.push(tag);
     }
     return kept;
@@ -62472,7 +62465,111 @@ async function trimRepo(exec, repoDir, keep, log = () => {}) {
     return { trimmed: true, kept: [...keptSet], sizeBefore, sizeAfter };
 }
 
-module.exports = { compareKeys, findShallowRoots, getKeepReleases, selectKeptTags, trimRepo, versionKey };
+module.exports = { findShallowRoots, getKeepReleases, selectKeptTags, trimRepo };
+
+
+/***/ }),
+
+/***/ 3547:
+/***/ ((module) => {
+
+// Version tags, parsed and ordered the same way as the PyAppify launcher
+// (src-tauri/src/git.rs, src/versions.ts) and pyappify-python (pyappify/versions.py).
+//
+//   [prefix] [v] N[.N[.N[.N]]] [prerelease word [number]]
+//
+// - prefix: a name ending in "-", "_" or "/", such as release-, app-v or app/; ignored for ordering.
+// - one to four number parts; missing parts count as 0 (v1.2 == v1.2.0). A single number
+//   needs the v (v5, app-v5), so plain numbers, pr/7 and commit hashes are no versions.
+// - the prerelease word may follow with or without "-", "." or "_", and so may its number:
+//   1.2.3-beta.2, 1.2.3b2, 1.2.3rc1, 1.2.3-preview, 1.2.3.post1. Case does not matter.
+//   dev < alpha (a) < beta (b) < any other word < rc (c, pre, preview) < release < post.
+//   A missing prerelease number sorts before any number.
+const VERSION_RE = /^([A-Za-z][A-Za-z0-9_.-]*?[-_/])??([vV])?(\d+(?:\.\d+){0,3})(?:[-._]?([A-Za-z]+)(?:[-._]?(\d+))?)?$/;
+const OTHER_RANK = 3;
+const RELEASE_RANK = 5;
+const WORD_RANK = {
+    dev: 0,
+    alpha: 1, a: 1,
+    beta: 2, b: 2,
+    rc: 4, c: 4, pre: 4, preview: 4,
+    post: 6,
+};
+
+function parseVersion(tag) {
+    const match = VERSION_RE.exec(String(tag || ''));
+    if (!match) return null;
+    const [, prefix, v, numbers, rawWord, number] = match;
+    const parts = numbers.split('.').map(Number);
+    if (parts.length === 1 && !v) return null;
+    return { prefix: prefix || '', v: v || '', parts, word: rawWord ? rawWord.toLowerCase() : '', number };
+}
+
+// [n1, n2, n3, n4, rank, number, word] for a version tag, else null.
+function versionKey(tag) {
+    const parsed = parseVersion(tag);
+    if (!parsed) return null;
+    const parts = [...parsed.parts];
+    while (parts.length < 4) parts.push(0);
+    const rank = parsed.word ? (WORD_RANK[parsed.word] ?? OTHER_RANK) : RELEASE_RANK;
+    return [
+        ...parts,
+        rank,
+        parsed.number === undefined ? -1 : Number(parsed.number),
+        rank === OTHER_RANK ? parsed.word : '',
+    ];
+}
+
+function compareKeys(a, b) {
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] === b[i]) continue;
+        if (typeof a[i] === 'string') return a[i] < b[i] ? -1 : 1;
+        return a[i] - b[i];
+    }
+    return 0;
+}
+
+function isVersionTag(tag) {
+    return versionKey(tag) !== null;
+}
+
+// A release, or a post release.
+function isReleaseKey(key) {
+    return key[4] >= RELEASE_RANK;
+}
+
+function isReleaseVersion(tag) {
+    const key = versionKey(tag);
+    return key !== null && isReleaseKey(key);
+}
+
+// The version tags in `tags`, newest first; equal versions by name.
+function sortVersionTags(tags) {
+    return tags
+        .map(tag => ({ tag, key: versionKey(tag) }))
+        .filter(item => item.key)
+        .sort((a, b) => compareKeys(b.key, a.key) || (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0))
+        .map(item => item.tag);
+}
+
+// The name a version has in a changelog heading: without brackets, name prefix or v,
+// so `## 1.3.0`, `## [v1.3.0]` and the tag release-v1.3.0 all match.
+function changelogVersion(version) {
+    const text = String(version).trim().replace(/^\[+|\]+$/g, '').trim();
+    const parsed = parseVersion(text);
+    if (parsed) return text.slice(parsed.prefix.length + parsed.v.length);
+    return /^[vV]\d/.test(text) ? text.slice(1) : text;
+}
+
+module.exports = {
+    changelogVersion,
+    compareKeys,
+    isReleaseKey,
+    isReleaseVersion,
+    isVersionTag,
+    sortVersionTags,
+    versionKey,
+};
 
 
 /***/ }),
@@ -72665,7 +72762,8 @@ const http = __nccwpck_require__(4844);
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = __nccwpck_require__(7299);
 const { getSetupVersion, setupProfile } = __nccwpck_require__(453);
 const { getKeepReleases, trimRepo } = __nccwpck_require__(9631);
-const { buildReleaseNotes } = __nccwpck_require__(6521);
+const { RECENT_COMMITS, SHORT_HASH_LENGTH, buildReleaseNotes, recentCommitNotes } = __nccwpck_require__(6521);
+const { changelogVersion, isVersionTag, sortVersionTags } = __nccwpck_require__(3547);
 const {
     buildRunCmd,
     buildUpdaterCmd,
@@ -72826,18 +72924,32 @@ async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDe
     core.endGroup();
 }
 
+async function gitOutput(args) {
+    let stdout = '';
+    const code = await exec.exec('git', args, {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: { stdout: (data) => (stdout += data.toString()) },
+    });
+    return code === 0 ? stdout : '';
+}
+
+// The version for add_version_name: the workflow tag, else the newest version tag
+// reachable from the checkout, else the checkout's short commit hash.
 async function getAppVersion() {
     if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME) {
         return process.env.GITHUB_REF_NAME;
     }
-    let latestTag = '';
-    await exec.exec('git', ['describe', '--tags', '--abbrev=0'], {
-        ignoreReturnCode: true,
-        listeners: { stdout: (data) => (latestTag += data.toString()) },
-    });
-    latestTag = latestTag.trim();
-    if (!latestTag) throw new Error('add_version_name is enabled but no git tag was found for the app version.');
-    return latestTag;
+    const tags = (await gitOutput(['tag', '--merged', 'HEAD'])).split(/\r?\n/).map(tag => tag.trim()).filter(Boolean);
+    const [latestTag] = sortVersionTags(tags);
+    if (latestTag) return latestTag;
+    const commit = (await gitOutput(['rev-parse', `--short=${SHORT_HASH_LENGTH}`, 'HEAD'])).trim();
+    if (commit) {
+        core.warning(`add_version_name: no version tag found, naming files after commit ${commit}.`);
+        return commit;
+    }
+    core.warning('add_version_name: no version tag or git commit found, leaving the version out of file names.');
+    return '';
 }
 
 async function run() {
@@ -72978,7 +73090,8 @@ async function run() {
         fs.writeFileSync(hashFilePath, hex);
         core.info(`Created SHA256 hash file: ${hashFilePath}`);
 
-        const appVersion = addVersionName ? (setupVersion || await getAppVersion()) : '';
+        // File names carry the version without the tag's name prefix and v (release-v1.2.0 -> 1.2.0).
+        const appVersion = addVersionName ? changelogVersion(setupVersion || await getAppVersion()) : '';
         if (appVersion) core.info(`Adding version ${appVersion} to installer names`);
 
         const baseZipFileName = `${appName}-${platform}.zip`;
@@ -73020,10 +73133,15 @@ async function run() {
             const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
             // Read before trimming, which drops the older tags the notes look back to.
             const preparedVersion = readPreparedAppVersion(generatedDataPath, appName);
-            if (!releaseNotes && preparedVersion && fs.existsSync(bundledRepoPath)) {
-                releaseNotes = await buildReleaseNotes(exec.exec, bundledRepoPath, preparedVersion);
-                core.info(`Release notes for ${preparedVersion} from ${releaseNotes.source}` +
-                    (releaseNotes.previous ? ` since ${releaseNotes.previous}` : ''));
+            if (!releaseNotes && fs.existsSync(bundledRepoPath)) {
+                if (isVersionTag(preparedVersion)) {
+                    releaseNotes = await buildReleaseNotes(exec.exec, bundledRepoPath, preparedVersion);
+                    core.info(`Release notes for ${preparedVersion} from ${releaseNotes.source}` +
+                        (releaseNotes.previous ? ` since ${releaseNotes.previous}` : ''));
+                } else {
+                    releaseNotes = await recentCommitNotes(exec.exec, bundledRepoPath);
+                    core.info(`No version tag prepared; release notes list the ${RECENT_COMMITS} most recent commits.`);
+                }
             }
             if (keepReleases && fs.existsSync(bundledRepoPath)) {
                 await trimRepo(exec.exec, bundledRepoPath, keepReleases, message => core.info(message));

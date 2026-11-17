@@ -9,6 +9,7 @@ const {
     changelogNotes,
     commitNotes,
     parseChangelog,
+    recentCommitNotes,
     versionsSince,
 } = require('./release-notes');
 
@@ -104,4 +105,31 @@ test('buildReleaseNotes uses the changelog entry, else the commits since the pre
     } finally {
         fs.rmSync(repo, { recursive: true, force: true });
     }
+});
+
+test('recentCommitNotes lists the most recent commits with short hashes, newest first', async () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-'));
+    try {
+        git(repo, 'init', '-q');
+        for (const message of ['One', 'Two', 'Three']) {
+            fs.writeFileSync(path.join(repo, 'file.txt'), message);
+            git(repo, 'add', '.');
+            git(repo, 'commit', '-q', '-m', message);
+        }
+        const hashes = git(repo, 'log', '--format=%h', '--abbrev=7').split('\n');
+        assert.deepEqual(await recentCommitNotes(exec, repo, 2), {
+            source: 'recent commits',
+            previous: '',
+            notes: `- ${hashes[0]} Three\n- ${hashes[1]} Two\n`,
+        });
+        assert.equal((await recentCommitNotes(exec, path.join(repo, 'missing'))).notes, '');
+    } finally {
+        fs.rmSync(repo, { recursive: true, force: true });
+    }
+});
+
+test('versionsSince understands unconventional tags', () => {
+    const tags = ['release-1.2', 'release-1.3b1', 'release-1.3', 'latest'];
+    assert.deepEqual(versionsSince(tags, 'release-1.3'), { versions: ['release-1.3', 'release-1.3b1'], previous: 'release-1.2' });
+    assert.deepEqual(parseChangelog('## release-1.3\n- Note\n').get('1.3'), ['Note']);
 });

@@ -102,7 +102,7 @@ Everything is written to `pyappify_dist/`. For an app named `my-app` with `relea
 | `my-app-win32.zip` | The bare launcher exe, which behaves like the online installer without installing. |
 | `win32_sha256.txt` | SHA-256 of the launcher exe. |
 
-Every profile gets its own installer and archive, so `debug` also produces `my-app-win32-debug-setup.exe` and `my-app-win32-debug.7z`. With `add_version_name: true`, the tag version is added to the names, e.g. `my-app-win32-release-setup-1.0.0.exe`.
+Every profile gets its own installer and archive, so `debug` also produces `my-app-win32-debug-setup.exe` and `my-app-win32-debug.7z`. With `add_version_name: true`, the tag version is added to the names, e.g. `my-app-win32-release-setup-1.0.0.exe` (or the short commit hash when there is no version tag).
 
 ## `pyappify.yml` reference
 
@@ -122,7 +122,7 @@ Profile keys:
 | Key | Description |
 |---|---|
 | `name` | Profile name, English only. |
-| `git_url` | HTTPS URL of the repo to clone. It must have version tags; semver like `v1.2.0` is recommended. |
+| `git_url` | HTTPS URL of the repo to clone. Its [version tags](#version-tags) are the app's versions; semver like `v1.2.0` is recommended. Without any, the 30 most recent commits are. |
 | `main_script` | Entry point. A `.py` file runs with the venv's Python. Other names are looked up in the working directory and the venv's `Scripts` folder, e.g. a console script. |
 | `requires_python` | Python version, `"3.7"` to `"3.13"`. |
 | `requirements` | A requirements file such as `requirements.txt`, or a pyproject spec such as `"."` or `".[gui,cuda]"`. |
@@ -143,7 +143,7 @@ All inputs are optional.
 | `package_zip` | `false` | Build a portable archive per profile. Its `.cmd` honors `admin`, `use_pythonw` and `PYTHONPATH`. |
 | `package_zip_updater` | `true` | Add `<name>-updater.cmd` to each archive. Skipped with a warning unless the app depends on `pyappify[standalone]` 1.0.20+. |
 | `package_zip_format` | `7z` | `7z`: solid LZMA2, about a third smaller than zip. It opens natively on Windows 11 23H2+, otherwise needs 7-Zip. Or `zip`. |
-| `add_version_name` | `false` | Append the tag version (without the leading `v`) to installer and archive names. |
+| `add_version_name` | `false` | Append the app version to installer and archive names: the tag version without its name prefix and `v` (`release-v1.2.0` gives `1.2.0`). Without a workflow tag it is the newest version tag reachable from the checkout, else the checkout's short commit hash, with a warning. |
 | `app_version` | pushed tag | Exact app tag to package, prereleases included. On tag builds it defaults to that tag. Set it for manual or branch builds; otherwise they package the latest stable tag. |
 | `use_release` | | GitHub release API URL, e.g. `https://api.github.com/repos/you/my-app/releases/tags/v1.0.0`. The launcher exe is taken from that release's assets instead of compiled, which saves the Rust build. |
 | `build_exe_only` | `false` | Only build the launcher exe and output its path, so you can code-sign it. Then run the action again in the same job to package with the signed exe. |
@@ -179,10 +179,27 @@ The action writes notes for the packaged version to `pyappify_release_notes.md`,
 
 - If `CHANGELOG.md` at that tag has an entry for the version, the notes are its entry, plus the entries of the prereleases since the previous release, repeated notes once.
 - Otherwise they are the commit subjects since the previous version (the previous release for a release, the previous version tag for a prerelease), merges skipped.
+- If the app has no version tags, they list the 30 most recent commits, `- <short hash> <subject>`, as those are its versions.
 
-The changelog format is described in [PyAppify's update notes](https://github.com/ok-oldking/pyappify#update-notes): `## v1.4.0` starts a version (`[v1.4.0]`, `1.4.0` and a trailing date also work), `- ` starts a note and an indented line continues it. Localized `CHANGELOG.<language>.md` files are used by the launcher; the release notes use the English `CHANGELOG.md`.
+The changelog format is described in [PyAppify's update notes](https://github.com/ok-oldking/pyappify#update-notes): `## v1.4.0` starts a version (`[v1.4.0]`, `1.4.0` and a trailing date also work, and a tag's name prefix is ignored, so `## 1.4.0` matches `release-v1.4.0`), `- ` starts a note and an indented line continues it. Localized `CHANGELOG.<language>.md` files are used by the launcher; the release notes use the English `CHANGELOG.md`.
 
 The file is written next to `pyappify_dist/`, not inside it, so `files: pyappify_dist/*` does not upload it. The notes are read from the bundled repo, so they are not written with `build_exe_only`.
+
+### Version tags
+
+The action, the PyAppify launcher and the `pyappify` Python package read a tag as a version when it has this form, and ignore other tags:
+
+```
+[prefix] [v] N[.N[.N[.N]]] [prerelease word [number]]
+```
+
+- **Prefix** (optional): a name ending in `-`, `_` or `/`, e.g. `release-1.2.0`, `app-v1.2.0`, `app/v1.2.0`. It is ignored when versions are compared.
+- **Numbers**: one to four parts, so `v1.2`, `v1.2.3.4` and `2026.11.17` work. Missing parts count as `0` (`v1.2` equals `v1.2.0`). A single number needs the `v` (`v5`, `app-v5`), so plain numbers and commit hashes are never versions.
+- **Prerelease** (optional): a word, optionally followed by a number, with or without `-`, `.` or `_` in between, in any case: `1.2.3-beta.2`, `1.2.3b2`, `1.2.3rc1`, `1.2.3-preview`, `1.2.3.dev4`. A version with a prerelease word is a test version, except `post`.
+
+Ordering, oldest first: `dev` < `alpha` (`a`) < `beta` (`b`) < any other word < `rc` (`c`, `pre`, `preview`) < release < `post`. A prerelease without a number comes before the same word with one (`v1.2.3-beta` < `v1.2.3-beta.1`).
+
+**Without version tags**, the app's versions are the 30 most recent commits on the repo's default branch, newest first, named by their 7-character hash. Installed apps then update to the newest commit, the release notes list those commits, and `add_version_name` uses the short hash. Unconventional formats and commit versions need a PyAppify launcher (`version`) and `pyappify` package built with this support; older ones only know `v1.2.3` style tags.
 
 ## Run it locally
 
@@ -200,7 +217,7 @@ node local.js --app-dir ../my-app --version v1.2.4 --package_zip true
 Differences from a workflow run:
 
 - PyAppify is cloned and built in `p/` inside your app folder. Later runs reuse the compiled launcher in `p/`; delete the folder to rebuild it, for example after changing `version`, `uac` or `icons/`. Add `p/`, `pyappify_dist/` and `pyappify_release_notes.md` to your `.gitignore`.
-- There is no workflow tag, so without `app_version` the launcher prepares your latest stable tag, and `add_version_name` names files after the newest tag reachable from your checkout (`git describe`). Set `--app_version v1.4.0` to package an exact tag. The launcher clones your app from `git_url`, so that tag must be pushed.
+- There is no workflow tag, so without `app_version` the launcher prepares your latest stable tag, and `add_version_name` names files after the newest version tag reachable from your checkout (or its short commit hash without one). Set `--app_version v1.4.0` to package an exact tag. The launcher clones your app from `git_url`, so that tag must be pushed.
 - Outputs are printed as `::set-output` lines instead of being passed to later steps. Nothing is uploaded or released.
 
 ## How it works

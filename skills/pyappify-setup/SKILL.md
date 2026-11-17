@@ -19,8 +19,10 @@ How PyAppify works, so your choices make sense: the built launcher clones the
 app from `git_url` at a **git tag**, downloads an isolated Python
 (`requires_python`), creates a venv, `pip install`s `requirements`, and runs
 `main_script`. The action pre-does this on CI so the installer/archive works
-offline. Updates are delivered by pushing new tags, so **the repo must use
-version tags** (semver like `v1.0.0` recommended).
+offline. Updates are delivered by pushing new tags, so **the repo should use
+version tags** (semver like `v1.0.0` recommended; `v1.2`, `release-1.2.0` and
+`1.2.3rc1` also work, see "Version tags" in the action's README). Without any
+version tag, the 30 most recent commits of the default branch are the versions.
 
 Follow the steps in order. Do not ask the user anything you can detect.
 
@@ -38,7 +40,7 @@ Gather these facts silently (read files, run read-only git commands):
 | GUI or console | Uses tkinter, PySide/PyQt, wx, pywebview, Kivy, Flet, pygame, etc. with no console output needed → GUI candidate for `use_pythonw`. |
 | Needs admin | Code that writes to Program Files, edits the registry (HKLM), uses `ctypes.windll.shell32.IsUserAnAdmin`, drivers, game memory/input hooks → candidate for `admin`. |
 | Git URL | `git remote get-url origin`. Convert SSH (`git@github.com:o/r.git`) to HTTPS (`https://github.com/o/r.git`). The end user's launcher clones this, so it must be **publicly readable over HTTPS**. |
-| Tags | `git tag --sort=-v:refname`. Note whether semver tags exist. |
+| Tags | `git tag --sort=-v:refname`. Note whether version tags exist (`v1.2.3`, `1.2`, `release-1.2.0`, `1.2.3rc1` ...; a single number needs a `v`). |
 | Icons | `icons/icon.ico` and `icons/icon.png` in the repo root? |
 | Default branch | `git symbolic-ref refs/remotes/origin/HEAD` or `git branch --show-current`. |
 
@@ -90,7 +92,7 @@ Profile keys:
 | Key | Meaning |
 |---|---|
 | `name` | Profile name, English only. Required. |
-| `git_url` | HTTPS repo URL to clone. Must have version tags. Set it on the first profile. |
+| `git_url` | HTTPS repo URL to clone. Its version tags are the versions (else its 30 most recent commits). Set it on the first profile. |
 | `main_script` | Entry point. Ending in `.py` → run with the venv's Python; otherwise searched in the working dir and the venv's `Scripts`/`bin`. |
 | `requires_python` | Python version, `"3.7"` – `"3.13"`, quoted string. |
 | `requirements` | `requirements.txt`-style file, or a pyproject spec like `"."` or `".[gui,cuda]"`. |
@@ -137,7 +139,7 @@ supported yet) when a `v*` tag is pushed. Action inputs (all optional):
 | `package_zip` | `false` | Also build a portable archive per profile: app-name folder with the prepared `data` (Python + venv + app) and `<name>.cmd` launcher. Honors `admin` and `use_pythonw`. |
 | `package_zip_updater` | `true` | Add `<name>-updater.cmd` to each archive: opens the pyappify Tk update window (version list with notes, pip mirror, update, restart via `<name>.cmd`). Needs `pyappify[standalone]>=1.0.20` (Python 3.10+) in the app's requirements; skipped with a warning otherwise. |
 | `package_zip_format` | `7z` | `7z` (much smaller; opens natively on Windows 11 23H2+, otherwise needs 7-Zip) or `zip`. |
-| `add_version_name` | `false` | Append the tag version (leading `v` removed) to installer/archive names. |
+| `add_version_name` | `false` | Append the tag version (name prefix and leading `v` removed) to installer/archive names; the short commit hash when there is no version tag. |
 | `version` | latest | Pin a PyAppify launcher tag, e.g. `v1.2.6`, from https://github.com/ok-oldking/pyappify/releases. Must be v1.2.4+. Recommended for reproducible builds. |
 | `app_version` | the pushed tag | Exact app tag to package; only needed for manual/branch builds. |
 | `use_release` | – | GitHub release API URL whose launcher exe is reused to skip the Rust build. |
@@ -213,7 +215,7 @@ Then tell the user, briefly:
    The workflow builds and attaches the installer/archives to a GitHub release
    for that tag. Every later version is just a new tag; installed apps update
    from the tags.
-3. Suggest the next tag: if no semver tag exists, `v1.0.0` (or the version in
+3. Suggest the next tag: if no version tag exists, `v1.0.0` (or the version in
    `pyproject.toml`); otherwise bump the latest tag (existing tags were created
    before the workflow existed and will not trigger a build).
 4. If they want to try the build before tagging, they can run it locally on

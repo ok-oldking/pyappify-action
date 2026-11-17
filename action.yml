@@ -28,7 +28,7 @@ inputs:
     default: true
 
   add_version_name:
-    description: if enabled, will add the app version (the pushed git tag, leading v removed) to the setup exe names, e.g. xxx-setup-1.1.0.exe or xxx-setup-1.1.0-beta.1.exe
+    description: if enabled, will add the app version (the pushed git tag without its name prefix and leading v) to the setup exe and archive names, e.g. xxx-setup-1.1.0.exe or xxx-setup-1.1.0-beta.1.exe. Without a pushed tag it is the newest version tag reachable from the checkout, else the checkout's short commit hash (with a warning) instead of failing.
     required: false
     type: boolean
     default: false
@@ -64,7 +64,7 @@ outputs:
     description: The tauri exe's folder location
 
   release-notes:
-    description: Markdown notes for the packaged version. The version's CHANGELOG.md entry (merged with the prereleases since the previous release) when it has one, otherwise the commit subjects since the previous version.
+    description: Markdown notes for the packaged version. The version's CHANGELOG.md entry (merged with the prereleases since the previous release) when it has one, otherwise the commit subjects since the previous version. Without version tags, the 30 most recent commits as '- <short hash> <subject>'.
 
   release-notes-path:
     description: Path of pyappify_release_notes.md holding release-notes, for the release step's body_path. Written outside pyappify_dist so it is not uploaded as an asset.

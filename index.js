@@ -11,7 +11,8 @@ const http = require('@actions/http-client');
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require('./build-config');
 const { getSetupVersion, setupProfile } = require('./setup-profile');
 const { getKeepReleases, trimRepo } = require('./trim-repo');
-const { buildReleaseNotes } = require('./release-notes');
+const { RECENT_COMMITS, SHORT_HASH_LENGTH, buildReleaseNotes, recentCommitNotes } = require('./release-notes');
+const { changelogVersion, isVersionTag, sortVersionTags } = require('./versions');
 const {
     buildRunCmd,
     buildUpdaterCmd,
@@ -172,18 +173,32 @@ async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDe
     core.endGroup();
 }
 
+async function gitOutput(args) {
+    let stdout = '';
+    const code = await exec.exec('git', args, {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: { stdout: (data) => (stdout += data.toString()) },
+    });
+    return code === 0 ? stdout : '';
+}
+
+// The version for add_version_name: the workflow tag, else the newest version tag
+// reachable from the checkout, else the checkout's short commit hash.
 async function getAppVersion() {
     if (process.env.GITHUB_REF_TYPE === 'tag' && process.env.GITHUB_REF_NAME) {
         return process.env.GITHUB_REF_NAME;
     }
-    let latestTag = '';
-    await exec.exec('git', ['describe', '--tags', '--abbrev=0'], {
-        ignoreReturnCode: true,
-        listeners: { stdout: (data) => (latestTag += data.toString()) },
-    });
-    latestTag = latestTag.trim();
-    if (!latestTag) throw new Error('add_version_name is enabled but no git tag was found for the app version.');
-    return latestTag;
+    const tags = (await gitOutput(['tag', '--merged', 'HEAD'])).split(/\r?\n/).map(tag => tag.trim()).filter(Boolean);
+    const [latestTag] = sortVersionTags(tags);
+    if (latestTag) return latestTag;
+    const commit = (await gitOutput(['rev-parse', `--short=${SHORT_HASH_LENGTH}`, 'HEAD'])).trim();
+    if (commit) {
+        core.warning(`add_version_name: no version tag found, naming files after commit ${commit}.`);
+        return commit;
+    }
+    core.warning('add_version_name: no version tag or git commit found, leaving the version out of file names.');
+    return '';
 }
 
 async function run() {
@@ -324,7 +339,8 @@ async function run() {
         fs.writeFileSync(hashFilePath, hex);
         core.info(`Created SHA256 hash file: ${hashFilePath}`);
 
-        const appVersion = addVersionName ? (setupVersion || await getAppVersion()) : '';
+        // File names carry the version without the tag's name prefix and v (release-v1.2.0 -> 1.2.0).
+        const appVersion = addVersionName ? changelogVersion(setupVersion || await getAppVersion()) : '';
         if (appVersion) core.info(`Adding version ${appVersion} to installer names`);
 
         const baseZipFileName = `${appName}-${platform}.zip`;
@@ -366,10 +382,15 @@ async function run() {
             const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
             // Read before trimming, which drops the older tags the notes look back to.
             const preparedVersion = readPreparedAppVersion(generatedDataPath, appName);
-            if (!releaseNotes && preparedVersion && fs.existsSync(bundledRepoPath)) {
-                releaseNotes = await buildReleaseNotes(exec.exec, bundledRepoPath, preparedVersion);
-                core.info(`Release notes for ${preparedVersion} from ${releaseNotes.source}` +
-                    (releaseNotes.previous ? ` since ${releaseNotes.previous}` : ''));
+            if (!releaseNotes && fs.existsSync(bundledRepoPath)) {
+                if (isVersionTag(preparedVersion)) {
+                    releaseNotes = await buildReleaseNotes(exec.exec, bundledRepoPath, preparedVersion);
+                    core.info(`Release notes for ${preparedVersion} from ${releaseNotes.source}` +
+                        (releaseNotes.previous ? ` since ${releaseNotes.previous}` : ''));
+                } else {
+                    releaseNotes = await recentCommitNotes(exec.exec, bundledRepoPath);
+                    core.info(`No version tag prepared; release notes list the ${RECENT_COMMITS} most recent commits.`);
+                }
             }
             if (keepReleases && fs.existsSync(bundledRepoPath)) {
                 await trimRepo(exec.exec, bundledRepoPath, keepReleases, message => core.info(message));

@@ -5,30 +5,9 @@
 const fs = require('fs');
 const path = require('path');
 
-// Same tag format and ordering as the launcher (src-tauri/src/git.rs).
-const VERSION_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:(?:-|\.)(alpha|beta|rc)(?:\.(\d+))?)?$/;
-const PRERELEASE_RANK = { alpha: 0, beta: 1, rc: 2 };
-const RELEASE_RANK = 3;
+const { compareKeys, isReleaseKey, versionKey } = require('./versions');
+
 const KEEP_RELEASES_CONFIG_KEY = 'pyappify.keepreleases';
-
-function versionKey(tag) {
-    const match = VERSION_RE.exec(tag);
-    if (!match) return null;
-    return [
-        Number(match[1]),
-        Number(match[2]),
-        Number(match[3]),
-        match[4] ? PRERELEASE_RANK[match[4]] : RELEASE_RANK,
-        match[5] === undefined ? -1 : Number(match[5]),
-    ];
-}
-
-function compareKeys(a, b) {
-    for (let i = 0; i < a.length; i++) {
-        if (a[i] !== b[i]) return a[i] - b[i];
-    }
-    return 0;
-}
 
 // The `keep` newest releases and the prereleases newer than the oldest of
 // them, newest first. With fewer releases than `keep`, every version tag.
@@ -36,12 +15,12 @@ function selectKeptTags(tags, keep) {
     const versions = tags
         .map(tag => ({ tag, key: versionKey(tag) }))
         .filter(item => item.key)
-        .sort((a, b) => compareKeys(b.key, a.key));
+        .sort((a, b) => compareKeys(b.key, a.key) || (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0));
     const kept = [];
     let releases = 0;
     for (const { tag, key } of versions) {
         if (releases >= keep) break;
-        if (key[3] === RELEASE_RANK) releases++;
+        if (isReleaseKey(key)) releases++;
         kept.push(tag);
     }
     return kept;
@@ -153,4 +132,4 @@ async function trimRepo(exec, repoDir, keep, log = () => {}) {
     return { trimmed: true, kept: [...keptSet], sizeBefore, sizeAfter };
 }
 
-module.exports = { compareKeys, findShallowRoots, getKeepReleases, selectKeptTags, trimRepo, versionKey };
+module.exports = { findShallowRoots, getKeepReleases, selectKeptTags, trimRepo };
