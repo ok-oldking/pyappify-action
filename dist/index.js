@@ -72705,7 +72705,7 @@ async function setupPnpm() {
 
 async function setupRust() {
     core.startGroup('Setting up Rust');
-    if (await io.which('cargo', true)) {
+    if (await io.which('cargo', false)) {
         core.info('Rust (cargo) is already installed. Skipping setup.');
         core.endGroup();
         return;

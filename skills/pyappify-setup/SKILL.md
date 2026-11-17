@@ -216,5 +216,9 @@ Then tell the user, briefly:
 3. Suggest the next tag: if no semver tag exists, `v1.0.0` (or the version in
    `pyproject.toml`); otherwise bump the latest tag (existing tags were created
    before the workflow existed and will not trigger a build).
+4. If they want to try the build before tagging, they can run it locally on
+   Windows; point them to "Run it locally" in
+   https://github.com/ok-oldking/pyappify-action#run-it-locally rather than
+   running a full build yourself (it compiles Rust and takes a long time).
 
 Do not commit, tag or push unless the user asks you to.

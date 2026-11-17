@@ -184,6 +184,25 @@ The changelog format is described in [PyAppify's update notes](https://github.co
 
 The file is written next to `pyappify_dist/`, not inside it, so `files: pyappify_dist/*` does not upload it. The notes are read from the bundled repo, so they are not written with `build_exe_only`.
 
+## Run it locally
+
+You can build on your own Windows machine instead of on a GitHub runner, for example to try a `pyappify.yml` change before tagging. You need Node.js 20+, git, [Rust](https://rustup.rs) with the Visual Studio C++ build tools ([Tauri's Windows prerequisites](https://tauri.app/start/prerequisites/#windows)), and 7-Zip if you build `7z` archives. pnpm is installed if it is missing.
+
+```bash
+git clone https://github.com/ok-oldking/pyappify-action.git
+cd pyappify-action
+npm install
+node local.js --app-dir ../my-app --version v1.2.4 --package_zip true
+```
+
+`local.js` runs the same bundled action (`dist/index.js`) in `--app-dir` (default: the current directory). It fills every input from its `action.yml` default the way the runner does. Pass inputs as `--<input> <value>`; a boolean input with no value means `true`, and `-` and `_` are interchangeable. Inputs already set as `INPUT_*` environment variables are used when not given on the command line.
+
+Differences from a workflow run:
+
+- PyAppify is cloned and built in `p/` inside your app folder. Later runs reuse the compiled launcher in `p/`; delete the folder to rebuild it, for example after changing `version`, `uac` or `icons/`. Add `p/`, `pyappify_dist/` and `pyappify_release_notes.md` to your `.gitignore`.
+- There is no workflow tag, so without `app_version` the launcher prepares your latest stable tag, and `add_version_name` names files after the newest tag reachable from your checkout (`git describe`). Set `--app_version v1.4.0` to package an exact tag. The launcher clones your app from `git_url`, so that tag must be pushed.
+- Outputs are printed as `::set-output` lines instead of being passed to later steps. Nothing is uploaded or released.
+
 ## How it works
 
 1. Clones [PyAppify](https://github.com/ok-oldking/pyappify) at the requested `version`. It then copies in your `pyappify.yml` and `icons/` and renames the project to your app name.
