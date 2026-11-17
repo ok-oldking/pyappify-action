@@ -122,7 +122,7 @@ Profile keys:
 | Key | Description |
 |---|---|
 | `name` | Profile name, English only. |
-| `git_url` | HTTPS URL of the repo to clone. Its [version tags](#version-tags) are the app's versions; semver like `v1.2.0` is recommended. Without any, the 30 most recent commits are. |
+| `git_url` | HTTPS URL of the repo to clone. Its [version tags](#version-tags) are the app's versions; semver like `v1.2.0` is recommended. Without any, the 30 most recent commits are. Leave it out to [package local files](#packaging-without-a-git-repo). |
 | `main_script` | Entry point. A `.py` file runs with the venv's Python. Other names are looked up in the working directory and the venv's `Scripts` folder, e.g. a console script. |
 | `requires_python` | Python version, `"3.7"` to `"3.13"`. |
 | `requirements` | A requirements file such as `requirements.txt`, or a pyproject spec such as `"."` or `".[gui,cuda]"`. |
@@ -144,11 +144,26 @@ All inputs are optional.
 | `package_zip_updater` | `true` | Add `<name>-updater.cmd` to each archive. Skipped with a warning unless the app depends on `pyappify[standalone]` 1.0.20+. |
 | `package_zip_format` | `7z` | `7z`: solid LZMA2, about a third smaller than zip. It opens natively on Windows 11 23H2+, otherwise needs 7-Zip. Or `zip`. |
 | `add_version_name` | `false` | Append the app version to installer and archive names: the tag version without its name prefix and `v` (`release-v1.2.0` gives `1.2.0`). Without a workflow tag it is the newest version tag reachable from the checkout, else the checkout's short commit hash, with a warning. |
+| `use_git_url` | `true` | `false` packages the app's local files instead of cloning `git_url`. See [packaging without a git repo](#packaging-without-a-git-repo). |
 | `app_version` | pushed tag | Exact app tag to package, prereleases included. On tag builds it defaults to that tag. Set it for manual or branch builds; otherwise they package the latest stable tag. |
 | `use_release` | | GitHub release API URL, e.g. `https://api.github.com/repos/you/my-app/releases/tags/v1.0.0`. The launcher exe is taken from that release's assets instead of compiled, which saves the Rust build. |
 | `build_exe_only` | `false` | Only build the launcher exe and output its path, so you can code-sign it. Then run the action again in the same job to package with the signed exe. |
 
 At least one of `build_setup` and `package_zip` must be `true`.
+
+### Packaging without a git repo
+
+Leave `git_url` out of `pyappify.yml`, or set `use_git_url: false`, and the action packages the files in the app directory instead of cloning a repo. In a git checkout these are its tracked and untracked files, minus ignored ones. Outside a repo it takes every file. Either way it skips `.git`, `.venv`, `venv`, `node_modules`, `__pycache__` and `pyappify_dist`.
+
+The launcher always installs from a git repo. So the action commits these files into a one-commit repo that has no remote, and the launcher sets each profile up from it. The packaged `pyappify.yml` has its `git_url` and `keep_releases` removed. This needs a PyAppify launcher (`version`) newer than v1.2.7, which uses a repo without a remote as is instead of fetching. `app_version`, or the workflow tag, becomes that commit's tag and the packaged version. Without either, the version is the commit hash.
+
+Compared with a `git_url` build:
+
+- Offline installers are built as usual. They contain only the one-commit repo.
+- The online installer is skipped, since there is no repo for it to download from.
+- Archives contain no repo and no updater cmd.
+- Installed apps get no updates. Ship a new installer or archive instead.
+- `keep_releases` is ignored.
 
 ### Portable updates
 

@@ -11,6 +11,7 @@ const http = require('@actions/http-client');
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require('./build-config');
 const { getSetupVersion, setupProfile } = require('./setup-profile');
 const { getKeepReleases, trimRepo } = require('./trim-repo');
+const { buildLocalSetupConfig, createSourceSnapshot, hasGitSource, stripGitSource, usesLocalSource } = require('./local-source');
 const { RECENT_COMMITS, SHORT_HASH_LENGTH, buildReleaseNotes, recentCommitNotes } = require('./release-notes');
 const { changelogVersion, isVersionTag, sortVersionTags } = require('./versions');
 const {
@@ -201,6 +202,21 @@ async function getAppVersion() {
     return '';
 }
 
+// After a setup from the local snapshot: drop the snapshot's origin and the
+// profiles' git_url in app.json, both runner paths. Without them the launcher
+// uses the bundled repository and never fetches.
+async function detachLocalSource(dataDir, appName, repoPath) {
+    if (fs.existsSync(repoPath)) {
+        await exec.exec('git', ['-C', repoPath, 'remote', 'remove', 'origin'], { ignoreReturnCode: true, silent: true });
+    }
+    const appJsonPath = path.join(dataDir, 'apps', appName, 'app.json');
+    if (!fs.existsSync(appJsonPath)) return;
+    const appJson = JSON.parse(fs.readFileSync(appJsonPath, 'utf8'));
+    if (!Array.isArray(appJson.profiles)) return;
+    appJson.profiles = appJson.profiles.map(profile => ({ ...profile, git_url: '' }));
+    fs.writeFileSync(appJsonPath, JSON.stringify(appJson, null, 2));
+}
+
 async function run() {
     try {
         const useRelease = core.getInput('use_release');
@@ -210,6 +226,7 @@ async function run() {
         const packageZip = core.getBooleanInput('package_zip');
         const packageFormat = getPackageFormat(core.getInput('package_zip_format'));
         const packageZipUpdater = core.getBooleanInput('package_zip_updater');
+        const useGitUrl = core.getBooleanInput('use_git_url');
         if (!buildExeOnly && !buildSetup && !packageZip) {
             throw new Error('At least one of build_setup or package_zip must be true.');
         }
@@ -233,7 +250,8 @@ async function run() {
         const config = yaml.load(fs.readFileSync(configFile, 'utf8'));
         const appName = config.name;
         if (!appName || !config.profiles) throw new Error(`'name' or 'profiles' not found in ${configFile}.`);
-        const keepReleases = getKeepReleases(config);
+        const localSource = usesLocalSource(config, useGitUrl);
+        const keepReleases = localSource ? null : getKeepReleases(config);
 
         const appDistDir = path.join(distDir, appName);
         fs.mkdirSync(appDistDir, { recursive: true });
@@ -274,7 +292,9 @@ async function run() {
             await setupRust();
 
             core.startGroup('Reading and preparing build');
-            fs.copyFileSync(configFile, path.join(buildDir, 'src-tauri', 'assets', configFile));
+            const embeddedConfigPath = path.join(buildDir, 'src-tauri', 'assets', configFile);
+            if (localSource) fs.writeFileSync(embeddedConfigPath, yaml.dump(stripGitSource(config)));
+            else fs.copyFileSync(configFile, embeddedConfigPath);
             if (fs.existsSync('icons')) {
                 const targetPath = path.join(buildDir, 'src-tauri', 'icons')
                 core.info(`icons folder exists copy to ${targetPath}`);
@@ -350,7 +370,21 @@ async function run() {
 
         const tauriDataPath = path.join(buildDir, 'src-tauri', 'data');
         let releaseNotes = null;
-        if (buildSetup) {
+        const snapshotDir = path.join(path.dirname(path.resolve(buildDir)), 'pyappify_source');
+        if (localSource) {
+            core.startGroup('Snapshotting the local app files');
+            const count = await createSourceSnapshot(exec.exec, {
+                sourceDir: '.', snapshotDir, appName, version: setupVersion,
+                // The packaged pyappify.yml must not point the launcher back at git_url.
+                replacements: hasGitSource(config) ? { [configFile]: yaml.dump(stripGitSource(config)) } : {},
+            });
+            core.info(`Packaging ${count} local files instead of cloning a git repository` +
+                (setupVersion ? ` (version ${setupVersion}).` : '.'));
+            core.endGroup();
+        }
+        if (buildSetup && localSource) {
+            core.info('Skipping the online installer: without a git repository it has nothing to download.');
+        } else if (buildSetup) {
             core.startGroup('Creating online installer');
             await removeIfExists(tauriDataPath);
             await io.mkdirP(tauriDataPath);
@@ -370,7 +404,14 @@ async function run() {
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
-            await setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion);
+            // The launcher reads a pyappify.yml next to its exe before its embedded one.
+            const setupConfigPath = path.join(appDistDir, configFile);
+            if (localSource) fs.writeFileSync(setupConfigPath, yaml.dump(buildLocalSetupConfig(config, snapshotDir)));
+            try {
+                await setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion);
+            } finally {
+                fs.rmSync(setupConfigPath, { force: true });
+            }
 
             await removeIfExists(tauriDataPath);
 
@@ -380,6 +421,7 @@ async function run() {
                 core.info(`Removed ${removed} __pycache__ folders from ${generatedDataPath}`);
             }
             const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
+            if (localSource) await detachLocalSource(generatedDataPath, appName, bundledRepoPath);
             // Read before trimming, which drops the older tags the notes look back to.
             const preparedVersion = readPreparedAppVersion(generatedDataPath, appName);
             if (!releaseNotes && fs.existsSync(bundledRepoPath)) {
@@ -402,8 +444,8 @@ async function run() {
                 const mainScript = getProfileValue(config.profiles, profile, 'main_script');
                 if (!mainScript) throw new Error(`main_script not set for profile ${profile.name}`);
                 const runCmdName = `${appName}.cmd`;
-                const updaterIssue = packageZipUpdater ? checkUpdaterSupport(generatedDataPath, appName) : '';
-                const withUpdater = packageZipUpdater && !updaterIssue;
+                const updaterIssue = packageZipUpdater && !localSource ? checkUpdaterSupport(generatedDataPath, appName) : '';
+                const withUpdater = packageZipUpdater && !localSource && !updaterIssue;
                 if (updaterIssue) core.warning(`Skipping ${getUpdaterCmdName(appName)}: ${updaterIssue}.`);
                 const cmdFiles = [{
                     name: runCmdName,
@@ -425,10 +467,21 @@ async function run() {
                     });
                 }
                 const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
-                if (packageFormat === '7z') {
-                    await create7zPackage(exec.exec, sevenZip, distDir, appName, cmdFiles, packagePath);
-                } else {
-                    await createZipPackage(archiver, generatedDataPath, cmdFiles, packagePath, appName);
+                // Archives run the app from working, so a local snapshot's repo stays out of them.
+                const stashedRepoPath = path.join(path.dirname(path.resolve(buildDir)), 'pyappify_repo_stash');
+                const stashRepo = localSource && fs.existsSync(bundledRepoPath);
+                if (stashRepo) {
+                    await removeIfExists(stashedRepoPath);
+                    await io.mv(bundledRepoPath, stashedRepoPath);
+                }
+                try {
+                    if (packageFormat === '7z') {
+                        await create7zPackage(exec.exec, sevenZip, distDir, appName, cmdFiles, packagePath);
+                    } else {
+                        await createZipPackage(archiver, generatedDataPath, cmdFiles, packagePath, appName);
+                    }
+                } finally {
+                    if (stashRepo) await io.mv(stashedRepoPath, bundledRepoPath);
                 }
                 core.info(`Created ${packageFormat} package ${packagePath}`);
             }

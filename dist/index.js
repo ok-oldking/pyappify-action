@@ -54,6 +54,137 @@ module.exports = {
 
 /***/ }),
 
+/***/ 2285:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// Packaging without a git repository: the launcher always sets an app up by
+// cloning a repo, so the action snapshots the app's local files into a
+// one-commit repository and points the setup at it instead of git_url.
+const fs = __nccwpck_require__(9896);
+const path = __nccwpck_require__(6928);
+
+// Top-level names never copied into the snapshot.
+const SKIPPED_NAMES = new Set([
+    '.git', '.venv', 'venv', 'node_modules', '__pycache__',
+    'pyappify_dist', 'pyappify_release_notes.md',
+]);
+const SNAPSHOT_GIT_CONFIG = [
+    '-c', 'user.name=pyappify', '-c', 'user.email=pyappify@localhost',
+    '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', '-c', 'core.hooksPath=',
+];
+
+// True when the app is packaged from its local files: use_git_url is false,
+// or no profile in pyappify.yml sets a git_url.
+function usesLocalSource(config, useGitUrl) {
+    return !useGitUrl || !(config.profiles || []).some(profile => profile && profile.git_url);
+}
+
+function isSkipped(relativePath) {
+    return relativePath.split('/').some(part => SKIPPED_NAMES.has(part));
+}
+
+function walkFiles(root, relative = '', files = []) {
+    for (const entry of fs.readdirSync(path.join(root, relative), { withFileTypes: true })) {
+        const child = relative ? `${relative}/${entry.name}` : entry.name;
+        if (isSkipped(child)) continue;
+        if (entry.isDirectory()) walkFiles(root, child, files);
+        else if (entry.isFile()) files.push(child);
+    }
+    return files;
+}
+
+// The files to package, '/'-separated and relative to sourceDir: in a git work
+// tree its tracked and untracked files minus ignored ones, otherwise every file.
+async function listSourceFiles(exec, sourceDir) {
+    let stdout = '';
+    const code = await exec('git', ['-C', sourceDir, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: { stdout: data => (stdout += data.toString()) },
+    });
+    if (code !== 0) return walkFiles(sourceDir).sort();
+    const files = stdout.split('\0').filter(Boolean)
+        .filter(file => !isSkipped(file))
+        // Skips deleted files, submodules and symlinks.
+        .filter(file => {
+            try {
+                return fs.lstatSync(path.join(sourceDir, file)).isFile();
+            } catch {
+                return false;
+            }
+        });
+    return [...new Set(files)].sort();
+}
+
+// pyappify.yml as packaged from local files: no git_url, so the launcher uses the
+// bundled repository without fetching, and no keep_releases.
+function stripGitSource(config) {
+    const { keep_releases: _keepReleases, ...rest } = config;
+    return {
+        ...rest,
+        profiles: (config.profiles || []).map(({ git_url: _gitUrl, ...profile }) => profile),
+    };
+}
+
+function hasGitSource(config) {
+    return 'keep_releases' in config || (config.profiles || []).some(profile => profile && 'git_url' in profile);
+}
+
+// Commits the files of sourceDir into a new bare repository at snapshotDir,
+// tagged with version when given. replacements maps a file to the content
+// committed in its place. Returns the number of files committed.
+async function createSourceSnapshot(exec, { sourceDir, snapshotDir, appName, version, replacements = {} }) {
+    const files = await listSourceFiles(exec, sourceDir);
+    if (!files.length) throw new Error(`No files to package in ${path.resolve(sourceDir)}.`);
+    fs.rmSync(snapshotDir, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(snapshotDir), { recursive: true });
+    const pathspecFile = `${snapshotDir}-files.txt`;
+    fs.writeFileSync(pathspecFile, files.join('\0'));
+    const git = (args, options = {}) => exec('git', [
+        ...SNAPSHOT_GIT_CONFIG,
+        `--git-dir=${path.resolve(snapshotDir)}`, `--work-tree=${path.resolve(sourceDir)}`,
+        ...args,
+    ], { silent: true, ...options });
+    try {
+        await exec('git', ['init', '-q', '--bare', '--initial-branch=main', snapshotDir], { silent: true });
+        await git(['add', '-f', `--pathspec-from-file=${path.resolve(pathspecFile)}`, '--pathspec-file-nul']);
+        for (const [file, content] of Object.entries(replacements)) {
+            if (!files.includes(file)) continue;
+            fs.writeFileSync(pathspecFile, content);
+            let blob = '';
+            await git(['hash-object', '-w', path.resolve(pathspecFile)], {
+                listeners: { stdout: data => (blob += data.toString()) },
+            });
+            await git(['update-index', '--cacheinfo', `100644,${blob.trim()},${file}`]);
+        }
+        await git(['commit', '-q', '--no-verify', '-m', version ? `${appName} ${version}` : appName]);
+        if (version) await git(['tag', version]);
+    } finally {
+        fs.rmSync(pathspecFile, { force: true });
+    }
+    return files.length;
+}
+
+// pyappify.yml for the headless setup: every profile clones the snapshot. The
+// snapshot has one commit, so keep_releases (a shallow clone) does not apply.
+function buildLocalSetupConfig(config, snapshotDir) {
+    const url = path.resolve(snapshotDir).replace(/\\/g, '/');
+    const stripped = stripGitSource(config);
+    return { ...stripped, profiles: stripped.profiles.map(profile => ({ ...profile, git_url: url })) };
+}
+
+module.exports = {
+    buildLocalSetupConfig,
+    createSourceSnapshot,
+    hasGitSource,
+    listSourceFiles,
+    stripGitSource,
+    usesLocalSource,
+};
+
+
+/***/ }),
+
 /***/ 4914:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -72762,6 +72893,7 @@ const http = __nccwpck_require__(4844);
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = __nccwpck_require__(7299);
 const { getSetupVersion, setupProfile } = __nccwpck_require__(453);
 const { getKeepReleases, trimRepo } = __nccwpck_require__(9631);
+const { buildLocalSetupConfig, createSourceSnapshot, hasGitSource, stripGitSource, usesLocalSource } = __nccwpck_require__(2285);
 const { RECENT_COMMITS, SHORT_HASH_LENGTH, buildReleaseNotes, recentCommitNotes } = __nccwpck_require__(6521);
 const { changelogVersion, isVersionTag, sortVersionTags } = __nccwpck_require__(3547);
 const {
@@ -72952,6 +73084,21 @@ async function getAppVersion() {
     return '';
 }
 
+// After a setup from the local snapshot: drop the snapshot's origin and the
+// profiles' git_url in app.json, both runner paths. Without them the launcher
+// uses the bundled repository and never fetches.
+async function detachLocalSource(dataDir, appName, repoPath) {
+    if (fs.existsSync(repoPath)) {
+        await exec.exec('git', ['-C', repoPath, 'remote', 'remove', 'origin'], { ignoreReturnCode: true, silent: true });
+    }
+    const appJsonPath = path.join(dataDir, 'apps', appName, 'app.json');
+    if (!fs.existsSync(appJsonPath)) return;
+    const appJson = JSON.parse(fs.readFileSync(appJsonPath, 'utf8'));
+    if (!Array.isArray(appJson.profiles)) return;
+    appJson.profiles = appJson.profiles.map(profile => ({ ...profile, git_url: '' }));
+    fs.writeFileSync(appJsonPath, JSON.stringify(appJson, null, 2));
+}
+
 async function run() {
     try {
         const useRelease = core.getInput('use_release');
@@ -72961,6 +73108,7 @@ async function run() {
         const packageZip = core.getBooleanInput('package_zip');
         const packageFormat = getPackageFormat(core.getInput('package_zip_format'));
         const packageZipUpdater = core.getBooleanInput('package_zip_updater');
+        const useGitUrl = core.getBooleanInput('use_git_url');
         if (!buildExeOnly && !buildSetup && !packageZip) {
             throw new Error('At least one of build_setup or package_zip must be true.');
         }
@@ -72984,7 +73132,8 @@ async function run() {
         const config = yaml.load(fs.readFileSync(configFile, 'utf8'));
         const appName = config.name;
         if (!appName || !config.profiles) throw new Error(`'name' or 'profiles' not found in ${configFile}.`);
-        const keepReleases = getKeepReleases(config);
+        const localSource = usesLocalSource(config, useGitUrl);
+        const keepReleases = localSource ? null : getKeepReleases(config);
 
         const appDistDir = path.join(distDir, appName);
         fs.mkdirSync(appDistDir, { recursive: true });
@@ -73025,7 +73174,9 @@ async function run() {
             await setupRust();
 
             core.startGroup('Reading and preparing build');
-            fs.copyFileSync(configFile, path.join(buildDir, 'src-tauri', 'assets', configFile));
+            const embeddedConfigPath = path.join(buildDir, 'src-tauri', 'assets', configFile);
+            if (localSource) fs.writeFileSync(embeddedConfigPath, yaml.dump(stripGitSource(config)));
+            else fs.copyFileSync(configFile, embeddedConfigPath);
             if (fs.existsSync('icons')) {
                 const targetPath = path.join(buildDir, 'src-tauri', 'icons')
                 core.info(`icons folder exists copy to ${targetPath}`);
@@ -73101,7 +73252,21 @@ async function run() {
 
         const tauriDataPath = path.join(buildDir, 'src-tauri', 'data');
         let releaseNotes = null;
-        if (buildSetup) {
+        const snapshotDir = path.join(path.dirname(path.resolve(buildDir)), 'pyappify_source');
+        if (localSource) {
+            core.startGroup('Snapshotting the local app files');
+            const count = await createSourceSnapshot(exec.exec, {
+                sourceDir: '.', snapshotDir, appName, version: setupVersion,
+                // The packaged pyappify.yml must not point the launcher back at git_url.
+                replacements: hasGitSource(config) ? { [configFile]: yaml.dump(stripGitSource(config)) } : {},
+            });
+            core.info(`Packaging ${count} local files instead of cloning a git repository` +
+                (setupVersion ? ` (version ${setupVersion}).` : '.'));
+            core.endGroup();
+        }
+        if (buildSetup && localSource) {
+            core.info('Skipping the online installer: without a git repository it has nothing to download.');
+        } else if (buildSetup) {
             core.startGroup('Creating online installer');
             await removeIfExists(tauriDataPath);
             await io.mkdirP(tauriDataPath);
@@ -73121,7 +73286,14 @@ async function run() {
         for (const profile of config.profiles) {
             core.info(`Processing profile: ${profile.name}`);
 
-            await setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion);
+            // The launcher reads a pyappify.yml next to its exe before its embedded one.
+            const setupConfigPath = path.join(appDistDir, configFile);
+            if (localSource) fs.writeFileSync(setupConfigPath, yaml.dump(buildLocalSetupConfig(config, snapshotDir)));
+            try {
+                await setupProfile(exec.exec, exeDestPath, profile.name, appName, appDistDir, setupVersion);
+            } finally {
+                fs.rmSync(setupConfigPath, { force: true });
+            }
 
             await removeIfExists(tauriDataPath);
 
@@ -73131,6 +73303,7 @@ async function run() {
                 core.info(`Removed ${removed} __pycache__ folders from ${generatedDataPath}`);
             }
             const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
+            if (localSource) await detachLocalSource(generatedDataPath, appName, bundledRepoPath);
             // Read before trimming, which drops the older tags the notes look back to.
             const preparedVersion = readPreparedAppVersion(generatedDataPath, appName);
             if (!releaseNotes && fs.existsSync(bundledRepoPath)) {
@@ -73153,8 +73326,8 @@ async function run() {
                 const mainScript = getProfileValue(config.profiles, profile, 'main_script');
                 if (!mainScript) throw new Error(`main_script not set for profile ${profile.name}`);
                 const runCmdName = `${appName}.cmd`;
-                const updaterIssue = packageZipUpdater ? checkUpdaterSupport(generatedDataPath, appName) : '';
-                const withUpdater = packageZipUpdater && !updaterIssue;
+                const updaterIssue = packageZipUpdater && !localSource ? checkUpdaterSupport(generatedDataPath, appName) : '';
+                const withUpdater = packageZipUpdater && !localSource && !updaterIssue;
                 if (updaterIssue) core.warning(`Skipping ${getUpdaterCmdName(appName)}: ${updaterIssue}.`);
                 const cmdFiles = [{
                     name: runCmdName,
@@ -73176,10 +73349,21 @@ async function run() {
                     });
                 }
                 const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
-                if (packageFormat === '7z') {
-                    await create7zPackage(exec.exec, sevenZip, distDir, appName, cmdFiles, packagePath);
-                } else {
-                    await createZipPackage(archiver, generatedDataPath, cmdFiles, packagePath, appName);
+                // Archives run the app from working, so a local snapshot's repo stays out of them.
+                const stashedRepoPath = path.join(path.dirname(path.resolve(buildDir)), 'pyappify_repo_stash');
+                const stashRepo = localSource && fs.existsSync(bundledRepoPath);
+                if (stashRepo) {
+                    await removeIfExists(stashedRepoPath);
+                    await io.mv(bundledRepoPath, stashedRepoPath);
+                }
+                try {
+                    if (packageFormat === '7z') {
+                        await create7zPackage(exec.exec, sevenZip, distDir, appName, cmdFiles, packagePath);
+                    } else {
+                        await createZipPackage(archiver, generatedDataPath, cmdFiles, packagePath, appName);
+                    }
+                } finally {
+                    if (stashRepo) await io.mv(stashedRepoPath, bundledRepoPath);
                 }
                 core.info(`Created ${packageFormat} package ${packagePath}`);
             }

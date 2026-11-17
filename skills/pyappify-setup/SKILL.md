@@ -92,7 +92,7 @@ Profile keys:
 | Key | Meaning |
 |---|---|
 | `name` | Profile name, English only. Required. |
-| `git_url` | HTTPS repo URL to clone. Its version tags are the versions (else its 30 most recent commits). Set it on the first profile. |
+| `git_url` | HTTPS repo URL to clone. Its version tags are the versions (else its 30 most recent commits). Set it on the first profile. Omit it (or set the action input `use_git_url: false`) to package the local files instead: no updates, no online setup, no updater cmd in archives. |
 | `main_script` | Entry point. Ending in `.py` → run with the venv's Python; otherwise searched in the working dir and the venv's `Scripts`/`bin`. |
 | `requires_python` | Python version, `"3.7"` – `"3.13"`, quoted string. |
 | `requirements` | `requirements.txt`-style file, or a pyproject spec like `"."` or `".[gui,cuda]"`. |
@@ -141,6 +141,7 @@ supported yet) when a `v*` tag is pushed. Action inputs (all optional):
 | `package_zip_format` | `7z` | `7z` (much smaller; opens natively on Windows 11 23H2+, otherwise needs 7-Zip) or `zip`. |
 | `add_version_name` | `false` | Append the tag version (name prefix and leading `v` removed) to installer/archive names; the short commit hash when there is no version tag. |
 | `version` | latest | Pin a PyAppify launcher tag, e.g. `v1.2.6`, from https://github.com/ok-oldking/pyappify/releases. Must be v1.2.4+. Recommended for reproducible builds. |
+| `use_git_url` | `true` | `false` packages the checkout's files (tracked + untracked, minus ignored) instead of cloning `git_url`. Also the behavior when no profile has `git_url`. Needs a PyAppify launcher newer than v1.2.7. |
 | `app_version` | the pushed tag | Exact app tag to package; only needed for manual/branch builds. |
 | `use_release` | – | GitHub release API URL whose launcher exe is reused to skip the Rust build. |
 | `build_exe_only` | `false` | Only build the launcher exe (output `exe-path`) so it can be code-signed, then run the action again with the signed exe. |
@@ -195,10 +196,11 @@ action produces is in `pyappify_dist/`.
 Check before finishing:
 
 - `pyappify.yml` parses as YAML; `name` and `profiles` exist; first profile has
-  `git_url`, `main_script`, `requires_python`, `requirements`.
+  `git_url` (unless packaging local files), `main_script`, `requires_python`, `requirements`.
 - `main_script` and the requirements file exist at the given paths **in the
   committed repo** (the launcher clones from git, untracked files are missing).
-- `git_url` is HTTPS and public.
+  Without `git_url` (local files), they only need to exist and not be ignored.
+- `git_url` is HTTPS and public, unless the user chose to package local files.
 - The workflow file parses as YAML and at least one output type is enabled.
 - If `icons/icon.ico` / `icons/icon.png` are missing, tell the user the default
   PyAppify icon will be used and that they can add `icons/icon.ico` (multi-size

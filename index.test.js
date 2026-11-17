@@ -11,7 +11,7 @@ const defaults = Object.fromEntries(Object.entries(
     yaml.load(fs.readFileSync(path.join(__dirname, 'action.yml'), 'utf8')).inputs,
 ).map(([name, input]) => [name, String(input.default ?? '')]));
 
-async function runAction(inputs = {}, cached = true, { updaterReady = false } = {}) {
+async function runAction(inputs = {}, cached = true, { updaterReady = false, gitUrl = 'https://example.com/demo.git' } = {}) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pyappify-action-'));
     const previousDirectory = process.cwd();
     const buildDir = path.join(root, 'runner', 'p');
@@ -24,9 +24,12 @@ async function runAction(inputs = {}, cached = true, { updaterReady = false } = 
         fs.mkdirSync(path.dirname(file), { recursive: true });
         fs.writeFileSync(file, text);
     };
-    const exec = async (command, args) => {
+    const appJsons = [];
+    const exec = async (command, args, options = {}) => {
         commands.push([command, ...args]);
-        if (command === 'git' && args[0] === 'clone') {
+        if (command === 'git' && args.includes('ls-files')) {
+            options.listeners.stdout(Buffer.from('pyappify.yml\0'));
+        } else if (command === 'git' && args[0] === 'clone') {
             fs.mkdirSync(path.join(buildDir, 'src-tauri', 'assets'), { recursive: true });
             write(path.join(buildDir, 'src-tauri', 'tauri.conf.json'), '{}');
             write(path.join(buildDir, 'src-tauri', 'Cargo.toml'), 'name = "pyappify"');
@@ -38,15 +41,21 @@ async function runAction(inputs = {}, cached = true, { updaterReady = false } = 
         } else if (command.endsWith('demo.exe')) {
             const app = path.join('pyappify_dist', 'demo', 'data', 'apps', 'demo');
             write(path.join(app, 'working', 'main.py'));
+            const setupConfig = path.join('pyappify_dist', 'demo', 'pyappify.yml');
+            const gitUrl = fs.existsSync(setupConfig) ? yaml.load(fs.readFileSync(setupConfig, 'utf8')).profiles[0].git_url : '';
             write(path.join(app, 'app.json'), JSON.stringify({
-                installed: true, current_version: 'v2.0.0-beta.1',
+                installed: true, current_version: 'v2.0.0-beta.1', profiles: [{ name: 'China', git_url: gitUrl }],
             }));
+            write(path.join(app, 'repo', 'HEAD'));
             if (updaterReady) {
                 const site = path.join(app, 'python', 'Lib', 'site-packages');
                 write(path.join(site, 'pyappify', 'updater_ui.py'));
                 write(path.join(site, 'dulwich', '__init__.py'));
-                write(path.join(app, 'repo', 'HEAD'));
             }
+        }
+        const tauriAppJson = path.join(buildDir, 'src-tauri', 'data', 'apps', 'demo', 'app.json');
+        if (args[0] === 'tauri' && args[1] === 'bundle' && fs.existsSync(tauriAppJson)) {
+            appJsons.push(JSON.parse(fs.readFileSync(tauriAppJson, 'utf8')));
         }
         return 0;
     };
@@ -77,7 +86,8 @@ async function runAction(inputs = {}, cached = true, { updaterReady = false } = 
     try {
         process.chdir(root);
         write('pyappify.yml', yaml.dump({
-            name: 'demo', profiles: [{ name: 'China', main_script: 'main.py' }, { name: 'Global' }],
+            name: 'demo',
+            profiles: [{ name: 'China', main_script: 'main.py', ...(gitUrl && { git_url: gitUrl }) }, { name: 'Global' }],
         }));
         if (cached) write(executable, 'signed binary');
         await vm.runInNewContext(source, {
@@ -91,7 +101,7 @@ async function runAction(inputs = {}, cached = true, { updaterReady = false } = 
         // Zip entry names are stored uncompressed, so a byte search finds them.
         const archives = Object.fromEntries(files.filter(file => file.endsWith('.zip'))
             .map(file => [file, fs.readFileSync(path.join('pyappify_dist', file)).toString('latin1')]));
-        return { commands, failures, warnings, outputs, files, archives };
+        return { commands, failures, warnings, outputs, files, archives, appJsons };
     } finally {
         process.chdir(previousDirectory);
         assert.ok(root.startsWith(path.join(os.tmpdir(), 'pyappify-action-')));
@@ -172,4 +182,39 @@ test('writes release notes once from the bundled repo, outside the dist folder',
     const shows = result.commands.filter(command => command[0] === 'git' && command.includes('show'));
     assert.equal(shows.length, 1);
     assert.equal(shows[0].at(-1), 'v2.0.0-beta.1:CHANGELOG.md');
+});
+
+test('packages local files without a git_url: no online setup, no repo or updater in archives', async () => {
+    const result = await runAction({ package_zip: true, app_version: 'v2.0.0-beta.1' }, true, { updaterReady: true, gitUrl: '' });
+    assert.deepEqual(result.failures, []);
+    assert.deepEqual(result.warnings, []);
+    const commandLines = result.commands.map(command => command.join(' '));
+    assert.ok(commandLines.some(line => line.startsWith('git init -q --bare')));
+    assert.ok(commandLines.some(line => line.endsWith('tag v2.0.0-beta.1')));
+    assert.equal(commandLines.filter(line => line.endsWith('remote remove origin')).length, 2);
+    assert.ok(!result.files.includes('demo-win32-online-setup.exe'));
+    assert.ok(result.files.includes('demo-win32-China-setup.exe'));
+    assert.ok(result.files.includes('demo-win32-Global-setup.exe'));
+    const archive = result.archives['demo-win32-China.zip'];
+    assert.ok(archive.includes('demo/demo.cmd'));
+    assert.ok(!archive.includes('demo-updater.cmd'));
+    assert.ok(!archive.includes('apps/demo/repo/'));
+    // Setups keep the snapshot repo the launcher needs, and app.json no runner path.
+    assert.equal(result.appJsons.length, 2);
+    assert.deepEqual(result.appJsons[0].profiles, [{ name: 'China', git_url: '' }]);
+});
+
+test('use_git_url false packages local files even when pyappify.yml has a git_url', async () => {
+    const result = await runAction({ use_git_url: false, build_setup: false, package_zip: true });
+    assert.deepEqual(result.failures, []);
+    assert.ok(result.commands.some(command => command.includes('init') && command.includes('--bare')));
+    assert.ok(!result.archives['demo-win32-China.zip'].includes('apps/demo/repo/'));
+});
+
+test('git_url builds clone as before without a local snapshot', async () => {
+    const result = await runAction({ package_zip: true });
+    assert.deepEqual(result.failures, []);
+    assert.ok(!result.commands.some(command => command.includes('--bare')));
+    assert.ok(result.files.includes('demo-win32-online-setup.exe'));
+    assert.ok(result.archives['demo-win32-China.zip'].includes('apps/demo/repo/'));
 });

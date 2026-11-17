@@ -7,6 +7,12 @@ inputs:
     description: Exact application tag to prepare before installing dependencies. Defaults to the workflow tag on tag builds, or latest stable otherwise. Requires PyAppify v1.2.4 or newer.
     required: false
 
+  use_git_url:
+    description: Clone the app from the profiles' git_url. Set to false, or leave git_url out of pyappify.yml, to package the app's local files instead (the checkout's tracked and untracked files minus ignored ones, or every file outside a git repository). Needs a PyAppify launcher newer than v1.2.7. Without a git repository there are no updates, the online setup is skipped and archives get no updater cmd; app_version (or the workflow tag) names the packaged version.
+    required: false
+    type: boolean
+    default: true
+
   version:
     description: The tag version of pyappify to use. Defaults to the latest tag. Strongly recommended to set to ensure consistancy.
     required: false
