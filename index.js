@@ -370,11 +370,14 @@ async function run() {
 
         const tauriDataPath = path.join(buildDir, 'src-tauri', 'data');
         let releaseNotes = null;
-        const snapshotDir = path.join(path.dirname(path.resolve(buildDir)), 'pyappify_source');
+        // Outside the app folder: a local run has no RUNNER_TEMP and builds in ./p.
+        const workDir = process.env.RUNNER_TEMP || require('os').tmpdir();
+        const snapshotDir = path.join(workDir, `pyappify_source_${appName}`);
         if (localSource) {
             core.startGroup('Snapshotting the local app files');
             const count = await createSourceSnapshot(exec.exec, {
                 sourceDir: '.', snapshotDir, appName, version: setupVersion,
+                excludeDirs: [buildDir],
                 // The packaged pyappify.yml must not point the launcher back at git_url.
                 replacements: hasGitSource(config) ? { [configFile]: yaml.dump(stripGitSource(config)) } : {},
             });
@@ -468,7 +471,7 @@ async function run() {
                 }
                 const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
                 // Archives run the app from working, so a local snapshot's repo stays out of them.
-                const stashedRepoPath = path.join(path.dirname(path.resolve(buildDir)), 'pyappify_repo_stash');
+                const stashedRepoPath = path.join(workDir, `pyappify_repo_stash_${appName}`);
                 const stashRepo = localSource && fs.existsSync(bundledRepoPath);
                 if (stashRepo) {
                     await removeIfExists(stashedRepoPath);
@@ -516,6 +519,7 @@ async function run() {
         }
 
         await removeIfExists(appDistDir);
+        if (localSource) await removeIfExists(snapshotDir);
         core.info(`deleting ${appDistDir}`);
         core.endGroup();
 

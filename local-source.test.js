@@ -29,18 +29,18 @@ test('packages local files when use_git_url is off or no profile has a git_url',
 
 test('lists every file outside a git repository except build and env folders', async t => {
     const root = tempDir(t, 'pyappify-local-');
-    for (const file of ['main.py', 'pkg/a.py', '.venv/x', 'pyappify_dist/y', 'pkg/__pycache__/a.pyc']) write(root, file);
-    assert.deepEqual(await listSourceFiles(exec, root), ['main.py', 'pkg/a.py']);
+    for (const file of ['main.py', 'pkg/a.py', '.venv/x', 'pyappify_dist/y', 'pkg/__pycache__/a.pyc', 'p/src-tauri/x', 'pp.py']) write(root, file);
+    assert.deepEqual(await listSourceFiles(exec, root, [path.join(root, 'p')]), ['main.py', 'pkg/a.py', 'pp.py']);
 });
 
 test('lists tracked and untracked files of a git work tree, without ignored ones', async t => {
     const root = tempDir(t, 'pyappify-local-');
     git(root, 'init', '-q');
     write(root, '.gitignore', 'secret.txt\n');
-    for (const file of ['main.py', 'new.py', 'secret.txt', 'gone.py']) write(root, file);
+    for (const file of ['main.py', 'new.py', 'secret.txt', 'gone.py', 'p/build.rs']) write(root, file);
     git(root, 'add', '.gitignore', 'main.py', 'gone.py');
     fs.rmSync(path.join(root, 'gone.py'));
-    assert.deepEqual(await listSourceFiles(exec, root), ['.gitignore', 'main.py', 'new.py']);
+    assert.deepEqual(await listSourceFiles(exec, root, [path.join(root, 'p')]), ['.gitignore', 'main.py', 'new.py']);
 });
 
 test('commits the files into a tagged one-commit bare repository that can be cloned', async t => {

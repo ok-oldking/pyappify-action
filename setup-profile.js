@@ -8,7 +8,8 @@ function getSetupVersion(input, env = process.env) {
 async function setupProfile(exec, executable, profile, appName, appDistDir, version) {
     const args = ['-c', 'setup', '-p', profile];
     if (version) args.push('--setup-version', version);
-    await exec(executable, args);
+    // From appDistDir, so the launcher's logs folder stays out of the app's own folder.
+    await exec(path.resolve(executable), args, { cwd: appDistDir });
 
     if (version) {
         const configPath = path.join(appDistDir, 'data', 'apps', appName, 'app.json');

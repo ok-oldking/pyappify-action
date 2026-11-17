@@ -232,7 +232,7 @@ node local.js --app-dir ../my-app --version v1.2.4 --package_zip true
 Differences from a workflow run:
 
 - PyAppify is cloned and built in `p/` inside your app folder. Later runs reuse the compiled launcher in `p/`; delete the folder to rebuild it, for example after changing `version`, `uac` or `icons/`. Add `p/`, `pyappify_dist/` and `pyappify_release_notes.md` to your `.gitignore`.
-- There is no workflow tag, so without `app_version` the launcher prepares your latest stable tag, and `add_version_name` names files after the newest version tag reachable from your checkout (or its short commit hash without one). Set `--app_version v1.4.0` to package an exact tag. The launcher clones your app from `git_url`, so that tag must be pushed.
+- There is no workflow tag, so without `app_version` the launcher prepares your latest stable tag, and `add_version_name` names files after the newest version tag reachable from your checkout (or its short commit hash without one). Set `--app_version v1.4.0` to package an exact tag. The launcher clones your app from `git_url`, so that tag must be pushed. To package your working files without pushing anything, pass `--use_git_url false`, or leave `git_url` out. See [packaging without a git repo](#packaging-without-a-git-repo).
 - Outputs are printed as `::set-output` lines instead of being passed to later steps. Nothing is uploaded or released.
 
 ## How it works

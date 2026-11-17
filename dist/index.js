@@ -79,15 +79,22 @@ function usesLocalSource(config, useGitUrl) {
     return !useGitUrl || !(config.profiles || []).some(profile => profile && profile.git_url);
 }
 
-function isSkipped(relativePath) {
-    return relativePath.split('/').some(part => SKIPPED_NAMES.has(part));
+function isSkipped(relativePath, excluded = []) {
+    return relativePath.split('/').some(part => SKIPPED_NAMES.has(part)) ||
+        excluded.some(dir => relativePath === dir || relativePath.startsWith(`${dir}/`));
 }
 
-function walkFiles(root, relative = '', files = []) {
+// The folders of dirs inside sourceDir, '/'-separated, such as a local build's p/.
+function excludedDirs(sourceDir, dirs) {
+    return dirs.map(dir => path.relative(path.resolve(sourceDir), path.resolve(dir)).split(path.sep).join('/'))
+        .filter(dir => dir && !dir.startsWith('..') && !path.isAbsolute(dir));
+}
+
+function walkFiles(root, excluded, relative = '', files = []) {
     for (const entry of fs.readdirSync(path.join(root, relative), { withFileTypes: true })) {
         const child = relative ? `${relative}/${entry.name}` : entry.name;
-        if (isSkipped(child)) continue;
-        if (entry.isDirectory()) walkFiles(root, child, files);
+        if (isSkipped(child, excluded)) continue;
+        if (entry.isDirectory()) walkFiles(root, excluded, child, files);
         else if (entry.isFile()) files.push(child);
     }
     return files;
@@ -95,16 +102,17 @@ function walkFiles(root, relative = '', files = []) {
 
 // The files to package, '/'-separated and relative to sourceDir: in a git work
 // tree its tracked and untracked files minus ignored ones, otherwise every file.
-async function listSourceFiles(exec, sourceDir) {
+async function listSourceFiles(exec, sourceDir, excludeDirs = []) {
+    const excluded = excludedDirs(sourceDir, excludeDirs);
     let stdout = '';
     const code = await exec('git', ['-C', sourceDir, 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
         ignoreReturnCode: true,
         silent: true,
         listeners: { stdout: data => (stdout += data.toString()) },
     });
-    if (code !== 0) return walkFiles(sourceDir).sort();
+    if (code !== 0) return walkFiles(sourceDir, excluded).sort();
     const files = stdout.split('\0').filter(Boolean)
-        .filter(file => !isSkipped(file))
+        .filter(file => !isSkipped(file, excluded))
         // Skips deleted files, submodules and symlinks.
         .filter(file => {
             try {
@@ -133,8 +141,8 @@ function hasGitSource(config) {
 // Commits the files of sourceDir into a new bare repository at snapshotDir,
 // tagged with version when given. replacements maps a file to the content
 // committed in its place. Returns the number of files committed.
-async function createSourceSnapshot(exec, { sourceDir, snapshotDir, appName, version, replacements = {} }) {
-    const files = await listSourceFiles(exec, sourceDir);
+async function createSourceSnapshot(exec, { sourceDir, snapshotDir, appName, version, replacements = {}, excludeDirs = [] }) {
+    const files = await listSourceFiles(exec, sourceDir, [...excludeDirs, snapshotDir]);
     if (!files.length) throw new Error(`No files to package in ${path.resolve(sourceDir)}.`);
     fs.rmSync(snapshotDir, { recursive: true, force: true });
     fs.mkdirSync(path.dirname(snapshotDir), { recursive: true });
@@ -62440,7 +62448,8 @@ function getSetupVersion(input, env = process.env) {
 async function setupProfile(exec, executable, profile, appName, appDistDir, version) {
     const args = ['-c', 'setup', '-p', profile];
     if (version) args.push('--setup-version', version);
-    await exec(executable, args);
+    // From appDistDir, so the launcher's logs folder stays out of the app's own folder.
+    await exec(path.resolve(executable), args, { cwd: appDistDir });
 
     if (version) {
         const configPath = path.join(appDistDir, 'data', 'apps', appName, 'app.json');
@@ -73252,11 +73261,14 @@ async function run() {
 
         const tauriDataPath = path.join(buildDir, 'src-tauri', 'data');
         let releaseNotes = null;
-        const snapshotDir = path.join(path.dirname(path.resolve(buildDir)), 'pyappify_source');
+        // Outside the app folder: a local run has no RUNNER_TEMP and builds in ./p.
+        const workDir = process.env.RUNNER_TEMP || (__nccwpck_require__(857).tmpdir)();
+        const snapshotDir = path.join(workDir, `pyappify_source_${appName}`);
         if (localSource) {
             core.startGroup('Snapshotting the local app files');
             const count = await createSourceSnapshot(exec.exec, {
                 sourceDir: '.', snapshotDir, appName, version: setupVersion,
+                excludeDirs: [buildDir],
                 // The packaged pyappify.yml must not point the launcher back at git_url.
                 replacements: hasGitSource(config) ? { [configFile]: yaml.dump(stripGitSource(config)) } : {},
             });
@@ -73350,7 +73362,7 @@ async function run() {
                 }
                 const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
                 // Archives run the app from working, so a local snapshot's repo stays out of them.
-                const stashedRepoPath = path.join(path.dirname(path.resolve(buildDir)), 'pyappify_repo_stash');
+                const stashedRepoPath = path.join(workDir, `pyappify_repo_stash_${appName}`);
                 const stashRepo = localSource && fs.existsSync(bundledRepoPath);
                 if (stashRepo) {
                     await removeIfExists(stashedRepoPath);
@@ -73398,6 +73410,7 @@ async function run() {
         }
 
         await removeIfExists(appDistDir);
+        if (localSource) await removeIfExists(snapshotDir);
         core.info(`deleting ${appDistDir}`);
         core.endGroup();
 

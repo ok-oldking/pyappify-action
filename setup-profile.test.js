@@ -27,7 +27,7 @@ test('passes a prerelease to setup and accepts the matching installed payload', 
     const root = preparedApp(t, version);
     const calls = [];
     await setupProfile(async (...args) => calls.push(args), 'example.exe', 'China', 'example', root, version);
-    assert.deepEqual(calls, [['example.exe', ['-c', 'setup', '-p', 'China', '--setup-version', version]]]);
+    assert.deepEqual(calls, [[path.resolve('example.exe'), ['-c', 'setup', '-p', 'China', '--setup-version', version], { cwd: root }]]);
 });
 
 test('rejects an older reused launcher that silently prepares latest stable', async t => {
@@ -47,5 +47,5 @@ test('does not accept an incomplete setup or suppress a missing-tag failure', as
 test('keeps latest stable setup when no application tag is specified', async () => {
     const calls = [];
     await setupProfile(async (...args) => calls.push(args), 'app.exe', 'China', 'example', 'unused', '');
-    assert.deepEqual(calls, [['app.exe', ['-c', 'setup', '-p', 'China']]]);
+    assert.deepEqual(calls, [[path.resolve('app.exe'), ['-c', 'setup', '-p', 'China'], { cwd: 'unused' }]]);
 });

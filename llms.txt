@@ -1,10 +1,10 @@
 # PyAppify Action
 
-> GitHub Action that packages a Python project with PyAppify into a Windows launcher, setup installers and portable 7z/zip archives, built on every pushed version tag. Configured by a `pyappify.yml` in the project root.
+> GitHub Action that packages a Python project with PyAppify into a Windows launcher, setup installers and portable 7z/zip archives, built on every pushed version tag or locally on Windows (`local.js`). The app comes from its public git repo, with updates, or from its local files, without a git repo. Configured by a `pyappify.yml` in the project root.
 
 If you are an AI coding agent asked to set up PyAppify for a project, fetch and follow this guide. It covers inspecting the project, the questions to ask the user, every `pyappify.yml` and action option, and the workflow template:
 
-- [PyAppify setup guide](https://raw.githubusercontent.com/ok-oldking/pyappify-action/master/skills/pyappify-setup/SKILL.md): step-by-step instructions to generate pyappify.yml and .github/workflows/build.yml
+- [PyAppify setup guide](https://raw.githubusercontent.com/ok-oldking/pyappify-action/master/skills/pyappify-setup/SKILL.md): step-by-step instructions to generate pyappify.yml plus a GitHub workflow (.github/workflows/build.yml), a local build script (build-pyappify.cmd), or both
 
 ## Reference
 
