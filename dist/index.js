@@ -73010,7 +73010,6 @@ const yaml = __nccwpck_require__(4281);
 const fs = __nccwpck_require__(9896);
 const path = __nccwpck_require__(6928);
 const archiver = __nccwpck_require__(9392);
-const http = __nccwpck_require__(4844);
 const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = __nccwpck_require__(7299);
 const { getSetupVersion, setupProfile, withPersistentCache } = __nccwpck_require__(453);
 const { getKeepReleases, trimRepo } = __nccwpck_require__(9631);
@@ -73095,29 +73094,6 @@ async function removeIfExists(directoryPath) {
     }
 }
 
-async function createZipArchive(sourceDir, zipFilePath, rootDirName) {
-    return new Promise((resolve, reject) => {
-        const output = fs.createWriteStream(zipFilePath);
-        const archive = archiver('zip', {
-            zlib: { level: 9 }
-        });
-
-        output.on('close', () => {
-            core.info(`Created zip archive: ${zipFilePath}`);
-            core.info(`createZipArchive finalize end: ${zipFilePath} ${sourceDir} ${rootDirName}`);
-            resolve();
-        });
-
-        output.on('error', err => reject(err));
-        archive.on('error', err => reject(err));
-
-        archive.pipe(output);
-        archive.directory(sourceDir, rootDirName);
-        core.info(`createZipArchive finalize start: ${zipFilePath} ${sourceDir} ${rootDirName}`);
-        archive.finalize();
-    });
-}
-
 function allowPnpmBuildScripts(packageJsonPath) {
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
     const pnpmConfig = packageJson.pnpm || {};
@@ -73131,51 +73107,6 @@ function allowPnpmBuildScripts(packageJsonPath) {
 
     fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
     core.info(`Allowed pnpm build scripts for: ${packageJson.pnpm.onlyBuiltDependencies.join(', ')}`);
-}
-
-async function downloadAndExtractRelease(useReleaseUrl, appName, platform, exeDestPath, targetReleasePath) {
-    core.startGroup('Downloading and extracting executable from release');
-    const token = process.env.GITHUB_TOKEN;
-    const headers = token ? { authorization: `token ${token}` } : undefined;
-    const client = new http.HttpClient('pyappify-action');
-    const releaseData = (await client.getJson(useReleaseUrl, headers)).result;
-
-    if (!releaseData || !releaseData.assets) {
-        throw new Error(`Could not fetch release data or assets from ${useReleaseUrl}`);
-    }
-
-    const assetName = `${appName}-${platform}.zip`;
-    const asset = releaseData.assets.find(a => a.name === assetName);
-
-    if (!asset) {
-        throw new Error(`Could not find asset named '${assetName}' in release ${useReleaseUrl}`);
-    }
-
-    core.info(`Downloading asset: ${asset.name} from ${asset.browser_download_url}`);
-    const downloadedZipPath = await tc.downloadTool(asset.browser_download_url, undefined, token ? `token ${token}` : undefined);
-
-    core.info(`Extracting ${asset.name}`);
-    const tempExtractDir = path.join(path.dirname(exeDestPath), 'temp_extract');
-    await io.mkdirP(tempExtractDir);
-    const extractedPath = await tc.extractZip(downloadedZipPath, tempExtractDir);
-
-    const exeSuffix = platform === 'win32' ? '.exe' : '';
-    const appBinaryName = `${appName}${exeSuffix}`;
-    const exeSourcePath = path.join(extractedPath, appName, appBinaryName);
-
-    if (!fs.existsSync(exeSourcePath)) {
-        throw new Error(`Executable not found at expected path after extraction: ${exeSourcePath}`);
-    }
-
-    core.info(`Moving executable from ${exeSourcePath} to ${exeDestPath}`);
-    await io.mkdirP(path.dirname(exeDestPath));
-    await io.mkdirP(path.dirname(targetReleasePath));
-    await io.cp(exeSourcePath, targetReleasePath)
-    await io.mv(exeSourcePath, exeDestPath);
-    await io.rmRF(tempExtractDir);
-
-    core.info(`Executable successfully placed at ${exeDestPath}`);
-    core.endGroup();
 }
 
 async function gitOutput(args) {
@@ -73223,7 +73154,6 @@ async function detachLocalSource(dataDir, appName, repoPath) {
 
 async function run() {
     try {
-        const useRelease = core.getInput('use_release');
         const buildExeOnly = core.getBooleanInput('build_exe_only');
         const buildSetup = core.getBooleanInput('build_setup');
         const addVersionName = core.getBooleanInput('add_version_name');
@@ -73239,12 +73169,8 @@ async function run() {
         const buildDir = process.env.RUNNER_TEMP
             ? path.join(process.env.RUNNER_TEMP, 'p')
             : 'p';
-        core.info(`start running buildExeOnly:${buildExeOnly} useRelease:${useRelease}`);
+        core.info(`start running buildExeOnly:${buildExeOnly}`);
         core.info(`Using build directory: ${buildDir}`);
-
-        if (useRelease && buildExeOnly) {
-            throw new Error('use_release and build_exe_only cannot be used at the same time.');
-        }
 
         const distDir = 'pyappify_dist';
         await removeIfExists(distDir);
@@ -73329,13 +73255,8 @@ async function run() {
             core.endGroup();
             core.startGroup('Building application with Cargo');
             await exec.exec('pnpm', ['install'], { cwd: buildDir });
-            if (useRelease) {
-                await downloadAndExtractRelease(useRelease, appName, platform, exeDestPath, exeSourcePath);
-                core.endGroup();
-            } else {
-                await exec.exec('pnpm', ['tauri', 'build', '--no-bundle'], { cwd: buildDir });
-                core.endGroup();
-            }
+            await exec.exec('pnpm', ['tauri', 'build', '--no-bundle'], { cwd: buildDir });
+            core.endGroup();
         }
 
         if (buildExeOnly) {
@@ -73355,20 +73276,9 @@ async function run() {
 
         if (platform !== 'win32') fs.chmodSync(exeDestPath, '755');
 
-        const fileBuffer = fs.readFileSync(exeDestPath);
-        const hashSum = (__nccwpck_require__(6982).createHash)('sha256');
-        hashSum.update(fileBuffer);
-        const hex = hashSum.digest('hex');
-        const hashFilePath = path.join(distDir, `${platform}_sha256.txt`);
-        fs.writeFileSync(hashFilePath, hex);
-        core.info(`Created SHA256 hash file: ${hashFilePath}`);
-
         // File names carry the version without the tag's name prefix and v (release-v1.2.0 -> 1.2.0).
         const appVersion = addVersionName ? changelogVersion(setupVersion || await getAppVersion()) : '';
         if (appVersion) core.info(`Adding version ${appVersion} to installer names`);
-
-        const baseZipFileName = `${appName}-${platform}.zip`;
-        await createZipArchive(appDistDir, path.join(distDir, baseZipFileName), appName);
 
         core.info(`read profiles ${config.profiles}`);
 

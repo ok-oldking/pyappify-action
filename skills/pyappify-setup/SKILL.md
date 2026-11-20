@@ -169,7 +169,6 @@ The same inputs drive the GitHub workflow (`with:` entries) and the local build
 | `version` | latest | Pin a PyAppify launcher tag, e.g. `v1.2.6`, from https://github.com/ok-oldking/pyappify/tags. Must be v1.2.4+, and newer than v1.2.7 when packaging local files. Recommended for reproducible builds. |
 | `use_git_url` | `true` | `false` packages the project's files (tracked + untracked, minus ignored) instead of cloning `git_url`. Also the behavior when no profile has `git_url`. |
 | `app_version` | the pushed tag | Exact app tag to package. On GitHub only needed for manual/branch builds. In a local build with a git source it picks the tag, which must be pushed. When packaging local files it names the version; without it the version is a commit hash. |
-| `use_release` | – | GitHub release API URL whose launcher exe is reused to skip the Rust build. |
 | `build_exe_only` | `false` | Only build the launcher exe (output `exe-path`) so it can be code-signed, then run the action again with the signed exe. |
 
 At least one of `build_setup` / `package_zip` must be `true`.
@@ -227,12 +226,12 @@ version, and the checked-out files are what gets packaged.
 
 ## Step 6: Local build: write `build-pyappify.cmd`
 
-Create `build-pyappify.cmd` in the project root. It keeps a copy of
-pyappify-action in `%LOCALAPPDATA%\pyappify-action` and updates it on every
-run. If `PYAPPIFY_ACTION_DIR` is set, it uses that folder as is instead. That
-folder's dev dependencies are removed, so don't point it at a pyappify-action checkout you develop in. It then
-runs the action's `local.js` on this project. Put the user's input choices on
-the `local.js` line as `--<input> <value>`:
+Create `build-pyappify.cmd` in the project root. It runs the latest
+[`pyappify`](https://www.npmjs.com/package/pyappify) npm package (the action's
+`local.js`) on this project through `npx`. If `PYAPPIFY_ACTION_DIR` is set, it
+runs `local.js` from that pyappify-action checkout instead, which needs
+`npm install` run in it once. Put the user's input choices on the last line as
+`--<input> <value>`:
 
 ```bat
 @echo off
@@ -241,16 +240,9 @@ rem Extra arguments are passed on, e.g.: build-pyappify.cmd --app_version v1.2.0
 rem Needs Node.js 20+, git, Rust with the Visual Studio C++ build tools,
 rem and 7-Zip for 7z archives. The first run compiles the launcher into p\.
 setlocal
-set "ACTION_DIR=%LOCALAPPDATA%\pyappify-action"
-if defined PYAPPIFY_ACTION_DIR (
-    set "ACTION_DIR=%PYAPPIFY_ACTION_DIR%"
-) else if exist "%LOCALAPPDATA%\pyappify-action\.git" (
-    git -C "%LOCALAPPDATA%\pyappify-action" pull -q --ff-only || exit /b 1
-) else (
-    git clone -q --depth 1 https://github.com/ok-oldking/pyappify-action.git "%LOCALAPPDATA%\pyappify-action" || exit /b 1
-)
-call npm install --prefix "%ACTION_DIR%" --omit=dev --no-audit --no-fund --loglevel=error || exit /b 1
-node "%ACTION_DIR%\local.js" --app-dir "%~dp0." --version v1.2.6 --package_zip true %*
+set "PYAPPIFY=npx -y pyappify@latest"
+if defined PYAPPIFY_ACTION_DIR set "PYAPPIFY=node "%PYAPPIFY_ACTION_DIR%\local.js""
+call %PYAPPIFY% --app-dir "%~dp0." --version v1.2.6 --package_zip true %*
 ```
 
 Write the file in plain ASCII. Then add these lines to `.gitignore` (create it

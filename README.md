@@ -99,8 +99,6 @@ Everything is written to `pyappify_dist/`. For an app named `my-app` with `relea
 | `my-app-win32-release-setup.exe` | **Offline installer** per profile: launcher, Python, venv, dependencies and your app. |
 | `my-app-win32-online-setup.exe` | **Online installer**: the launcher only. Downloads Python, your code and dependencies on first run, and lets the user pick a profile. |
 | `my-app-win32-release.7z` | **Portable archive** per profile (`package_zip: true`). Unpack and run `my-app.cmd`. No installer and no launcher UI. `my-app-updater.cmd` opens the update window ([portable updates](#portable-updates)). |
-| `my-app-win32.zip` | The bare launcher exe, which behaves like the online installer without installing. |
-| `win32_sha256.txt` | SHA-256 of the launcher exe. |
 
 Every profile gets its own installer and archive, so `debug` also produces `my-app-win32-debug-setup.exe` and `my-app-win32-debug.7z`. With `add_version_name: true`, the tag version is added to the names, e.g. `my-app-win32-release-setup-1.0.0.exe` (or the short commit hash when there is no version tag).
 
@@ -147,7 +145,6 @@ All inputs are optional.
 | `add_version_name` | `false` | Append the app version to installer and archive names: the tag version without its name prefix and `v` (`release-v1.2.0` gives `1.2.0`). Without a workflow tag it is the newest version tag reachable from the checkout, else the checkout's short commit hash, with a warning. |
 | `use_git_url` | `true` | `false` packages the app's local files instead of cloning `git_url`. See [packaging without a git repo](#packaging-without-a-git-repo). |
 | `app_version` | pushed tag | Exact app tag to package, prereleases included. On tag builds it defaults to that tag. Set it for manual or branch builds; otherwise they package the latest stable tag. |
-| `use_release` | | GitHub release API URL, e.g. `https://api.github.com/repos/you/my-app/releases/tags/v1.0.0`. The launcher exe is taken from that release's assets instead of compiled, which saves the Rust build. |
 | `build_exe_only` | `false` | Only build the launcher exe and output its path, so you can code-sign it. Then run the action again in the same job to package with the signed exe. |
 
 At least one of `build_setup` and `package_zip` must be `true`.
@@ -238,14 +235,15 @@ Ordering, oldest first: `dev` < `alpha` (`a`) < `beta` (`b`) < any other word < 
 
 You can build on your own Windows machine instead of on a GitHub runner, for example to try a `pyappify.yml` change before tagging. You need Node.js 20+, git, [Rust](https://rustup.rs) with the Visual Studio C++ build tools ([Tauri's Windows prerequisites](https://tauri.app/start/prerequisites/#windows)), and 7-Zip if you build `7z` archives. pnpm is installed if it is missing.
 
+Run it from your app folder with the [`pyappify`](https://www.npmjs.com/package/pyappify) npm package:
+
 ```bash
-git clone https://github.com/ok-oldking/pyappify-action.git
-cd pyappify-action
-npm install
-node local.js --app-dir ../my-app --version v1.2.4 --package_zip true
+npx pyappify@latest --version v1.2.4 --package_zip true
 ```
 
-`local.js` runs the same bundled action (`dist/index.js`) in `--app-dir` (default: the current directory). It fills every input from its `action.yml` default the way the runner does. Pass inputs as `--<input> <value>`; a boolean input with no value means `true`, and `-` and `_` are interchangeable. Inputs already set as `INPUT_*` environment variables are used when not given on the command line.
+Or install it once with `npm install -g pyappify` and run `pyappify`. From a checkout of this repository, `node local.js` does the same after `npm install`.
+
+The command runs the same bundled action (`dist/index.js`) in `--app-dir` (default: the current directory). It fills every input from its `action.yml` default the way the runner does. Pass inputs as `--<input> <value>`; a boolean input with no value means `true`, and `-` and `_` are interchangeable. Inputs already set as `INPUT_*` environment variables are used when not given on the command line.
 
 Differences from a workflow run:
 
@@ -257,7 +255,7 @@ Differences from a workflow run:
 ## How it works
 
 1. Clones [PyAppify](https://github.com/ok-oldking/pyappify) at the requested `version`. It then copies in your `pyappify.yml` and `icons/` and renames the project to your app name.
-2. Compiles the launcher with Tauri/Rust, unless `use_release` provides one.
+2. Compiles the launcher with Tauri/Rust.
 3. For each profile, runs the launcher's headless setup at the exact tag being released. This clones your repo, downloads Python, creates the venv and installs your requirements. The action then checks that the prepared version matches the tag.
 4. Removes `__pycache__` folders, so the app's first start is a little slower. Trims the git history to `keep_releases` if set.
 5. Bundles the prepared profile into an NSIS installer and/or a portable archive, then writes everything to `pyappify_dist/`.

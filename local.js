@@ -2,17 +2,18 @@
 // Runs the bundled action (dist/index.js) on this machine instead of on a GitHub runner.
 // Fills each input from action.yml's defaults, like the runner does, so missing
 // boolean inputs do not fail. Usage:
-//   node local.js [--app-dir <dir>] [--<input> <value>] [--<boolean input>]
+//   npx pyappify [--app-dir <dir>] [--<input> <value>] [--<boolean input>]
+// (or node local.js ... from a checkout of this repository)
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const yaml = require('js-yaml');
 
-const usage = `Usage: node local.js [--app-dir <dir>] [--<input> <value> ...]
+const usage = `Usage: pyappify [--app-dir <dir>] [--<input> <value> ...]
 
 Runs PyAppify on this machine for the app in --app-dir (default: current directory),
 which must contain pyappify.yml. Inputs are the ones in action.yml, for example:
-  node local.js --app-dir ../my-app --package_zip true --build_setup false
+  pyappify --app-dir ../my-app --package_zip true --build_setup false
 A boolean input given without a value means true. Dashes and underscores are interchangeable.`;
 
 function readInputDefaults(actionYmlPath) {

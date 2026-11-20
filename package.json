@@ -1,27 +1,58 @@
 {
     "name": "pyappify",
     "version": "1.0.0",
-    "description": "pyappify action",
-    "main": "index.js",
+    "description": "Build PyAppify Windows launchers, installers and archives for a Python app on your own machine",
+    "keywords": [
+        "pyappify",
+        "python",
+        "windows",
+        "installer",
+        "packaging",
+        "tauri"
+    ],
+    "homepage": "https://github.com/ok-oldking/pyappify-action#run-it-locally",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ok-oldking/pyappify-action.git"
+    },
+    "bugs": {
+        "url": "https://github.com/ok-oldking/pyappify-action/issues"
+    },
+    "license": "GPL-3.0-only",
+    "bin": {
+        "pyappify": "local.js"
+    },
+    "files": [
+        "local.js",
+        "action.yml",
+        "dist/index.js",
+        "dist/sourcemap-register.js",
+        "dist/licenses.txt",
+        "LICENSE.txt",
+        "README.md"
+    ],
+    "engines": {
+        "node": ">=20"
+    },
     "scripts": {
         "build": "ncc build index.js --source-map --license licenses.txt",
         "test": "node --test",
         "local": "node local.js"
     },
     "dependencies": {
+        "js-yaml": "^4.1.0"
+    },
+    "devDependencies": {
         "@actions/core": "^1.10.1",
         "@actions/exec": "^1.1.1",
         "@actions/io": "^1.1.3",
         "@actions/tool-cache": "^2.0.2",
         "archiver": "^7.0.1",
-        "js-yaml": "^4.1.0"
-    },
-    "devDependencies": {
         "@vercel/ncc": "^0.38.3"
     },
     "pnpm": {
         "onlyBuiltDependencies": [
-          "esbuild"
+            "esbuild"
         ]
     }
 }
