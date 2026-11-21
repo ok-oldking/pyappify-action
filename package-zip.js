@@ -54,6 +54,59 @@ function removePycache(dir) {
     return removed;
 }
 
+// Stdlib folders an app never imports: the IDLE editor and the turtle demos.
+const UNUSED_STDLIB_DIRS = ['idlelib', 'turtledemo'];
+const TEST_DIR_NAMES = new Set(['test', 'tests']);
+const TEST_FILE = /^(test_.*|.*_test|conftest)\.py$/i;
+
+function dirSize(dir) {
+    let bytes = 0;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        bytes += entry.isDirectory() ? dirSize(full) : fs.lstatSync(full).size;
+    }
+    return bytes;
+}
+
+// A test or tests folder holding test modules, like the stdlib's test package or
+// numpy/_core/tests. A folder of that name without test modules may be app data.
+function isTestSuite(dir) {
+    return fs.readdirSync(dir, { withFileTypes: true }).some(entry => entry.isFile() && TEST_FILE.test(entry.name));
+}
+
+function removeTestSuites(dir, result) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const full = path.join(dir, entry.name);
+        if (TEST_DIR_NAMES.has(entry.name.toLowerCase()) && isTestSuite(full)) {
+            result.bytes += dirSize(full);
+            result.dirs++;
+            fs.rmSync(full, { recursive: true, force: true });
+        } else {
+            removeTestSuites(full, result);
+        }
+    }
+}
+
+// Removes what a packaged app does not run from its Python install (pythonDir is
+// apps/<name>/python): test suites in the stdlib and site-packages, idlelib and
+// turtledemo. pip, setuptools, ensurepip, headers and *.dist-info stay, so updates
+// can still install packages. Returns the folders removed and their size.
+function stripPython(pythonDir) {
+    const result = { dirs: 0, bytes: 0 };
+    const libDir = path.join(pythonDir, 'Lib');
+    if (!fs.existsSync(libDir)) return result;
+    for (const name of UNUSED_STDLIB_DIRS) {
+        const full = path.join(libDir, name);
+        if (!fs.existsSync(full)) continue;
+        result.bytes += dirSize(full);
+        result.dirs++;
+        fs.rmSync(full, { recursive: true, force: true });
+    }
+    removeTestSuites(libDir, result);
+    return result;
+}
+
 // Mirrors pyappify's find_script_or_executable: working dir first, then python/Scripts (with extensions).
 // Returns a path relative to the package root (the folder containing the .cmd), using backslashes.
 function resolveMainScript(dataDir, appName, mainScript) {
@@ -248,4 +301,5 @@ module.exports = {
     removePycache,
     readPreparedAppVersion,
     resolveMainScript,
+    stripPython,
 };

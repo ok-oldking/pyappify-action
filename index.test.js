@@ -216,5 +216,16 @@ test('git_url builds clone as before without a local snapshot', async () => {
     assert.deepEqual(result.failures, []);
     assert.ok(!result.commands.some(command => command.includes('--bare')));
     assert.ok(result.files.includes('demo-win32-online-setup.exe'));
-    assert.ok(result.archives['demo-win32-China.zip'].includes('apps/demo/repo/'));
+});
+
+test('archives keep the git repo only for their updater', async () => {
+    const withUpdater = await runAction({ build_setup: false, package_zip: true }, true, { updaterReady: true });
+    assert.deepEqual(withUpdater.failures, []);
+    assert.ok(withUpdater.archives['demo-win32-China.zip'].includes('demo/demo-updater.cmd'));
+    assert.ok(withUpdater.archives['demo-win32-China.zip'].includes('apps/demo/repo/'));
+
+    const withoutUpdater = await runAction({ build_setup: false, package_zip: true, package_zip_updater: false });
+    assert.deepEqual(withoutUpdater.failures, []);
+    assert.ok(withoutUpdater.archives['demo-win32-China.zip'].includes('apps/demo/working/'));
+    assert.ok(!withoutUpdater.archives['demo-win32-China.zip'].includes('apps/demo/repo/'));
 });

@@ -16,7 +16,51 @@ const {
     isStoredInZip,
     removePycache,
     resolveMainScript,
+    stripPython,
 } = require('./package-zip');
+
+test('stripPython removes test suites, idlelib and turtledemo but keeps what updates need', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'strip-'));
+    const lib = path.join(root, 'Lib');
+    const site = path.join(lib, 'site-packages');
+    const write = (rel, text = 'x') => {
+        const file = path.join(root, rel);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, text);
+    };
+    write('Lib/test/test_os.py', '1234');
+    write('Lib/test/support/__init__.py');
+    write('Lib/idlelib/idle.py');
+    write('Lib/turtledemo/demo.py');
+    write('Lib/unittest/test/test_case.py');
+    write('Lib/os.py');
+    write('Lib/ensurepip/__init__.py');
+    write('Lib/site-packages/numpy/_core/tests/test_numeric.py');
+    write('Lib/site-packages/pandas/tests/conftest.py');
+    write('Lib/site-packages/pkg/Tests/thing_test.py');
+    write('Lib/site-packages/models/tests/model.bin');
+    write('Lib/site-packages/pip/__init__.py');
+    write('Lib/site-packages/numpy-2.0.dist-info/RECORD');
+    write('include/Python.h');
+
+    const result = stripPython(root);
+    assert.strictEqual(result.dirs, 7);
+    assert.ok(result.bytes >= 4);
+    for (const gone of ['test', 'idlelib', 'turtledemo', 'unittest/test']) {
+        assert.ok(!fs.existsSync(path.join(lib, gone)), gone);
+    }
+    for (const gone of ['numpy/_core/tests', 'pandas/tests', 'pkg/Tests']) {
+        assert.ok(!fs.existsSync(path.join(site, gone)), gone);
+    }
+    // A tests folder without test modules may be data the app loads.
+    assert.ok(fs.existsSync(path.join(site, 'models', 'tests', 'model.bin')));
+    for (const kept of ['Lib/os.py', 'Lib/ensurepip/__init__.py', 'Lib/site-packages/pip/__init__.py',
+        'Lib/site-packages/numpy-2.0.dist-info/RECORD', 'include/Python.h']) {
+        assert.ok(fs.existsSync(path.join(root, kept)), kept);
+    }
+    assert.deepStrictEqual(stripPython(path.join(root, 'missing')), { dirs: 0, bytes: 0 });
+    fs.rmSync(root, { recursive: true, force: true });
+});
 
 test('zip package name includes profile, optional version and format', () => {
     assert.strictEqual(getZipPackageFileName('app', 'win32', 'release'), 'app-win32-release.zip');

@@ -7,7 +7,7 @@ const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
 const archiver = require('archiver');
-const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = require('./build-config');
+const { NSIS_DICT_SIZE_MB, getInstallerFileName, getMainBinaryName, prepareNsisTemplate, prepareTauriConfig } = require('./build-config');
 const { getSetupVersion, setupProfile, withPersistentCache } = require('./setup-profile');
 const { getKeepReleases, trimRepo } = require('./trim-repo');
 const { getExtraFiles, placeExtraFiles } = require('./extra-files');
@@ -28,6 +28,7 @@ const {
     readPreparedAppVersion,
     removePycache,
     resolveMainScript,
+    stripPython,
 } = require('./package-zip');
 
 async function find7z() {
@@ -89,6 +90,29 @@ async function removeIfExists(directoryPath) {
         await io.rmRF(directoryPath);
         core.info(`Removed dir if exists: ${directoryPath}`);
     }
+}
+
+// Sets the LZMA dictionary size in the launcher's NSIS template before bundling. Runs on
+// every build, so a launcher reused from an earlier build gets it too.
+function prepareNsisCompression(buildDir) {
+    const srcTauri = path.join(buildDir, 'src-tauri');
+    const tauriConfPath = path.join(srcTauri, 'tauri.conf.json');
+    if (!fs.existsSync(tauriConfPath)) return;
+    const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
+    const nsis = (tauriConf.bundle && tauriConf.bundle.windows && tauriConf.bundle.windows.nsis) || {};
+    if (!nsis.template) {
+        core.info("The launcher uses Tauri's built-in NSIS template; keeping its default LZMA dictionary.");
+        return;
+    }
+    const templatePath = path.join(srcTauri, nsis.template);
+    const template = fs.readFileSync(templatePath, 'utf8');
+    const prepared = prepareNsisTemplate(template);
+    if (prepared === null) {
+        core.warning(`No SetCompressor line in ${templatePath}; installers keep NSIS's default 8 MB LZMA dictionary.`);
+        return;
+    }
+    if (prepared !== template) fs.writeFileSync(templatePath, prepared);
+    core.info(`NSIS installers use a ${NSIS_DICT_SIZE_MB} MB LZMA dictionary.`);
 }
 
 function allowPnpmBuildScripts(packageJsonPath) {
@@ -158,6 +182,7 @@ async function run() {
         const packageFormat = getPackageFormat(core.getInput('package_zip_format'));
         const packageZipUpdater = core.getBooleanInput('package_zip_updater');
         const useGitUrl = core.getBooleanInput('use_git_url');
+        const stripPythonInput = core.getBooleanInput('strip_python');
         if (!buildExeOnly && !buildSetup && !packageZip) {
             throw new Error('At least one of build_setup or package_zip must be true.');
         }
@@ -296,6 +321,7 @@ async function run() {
                 (setupVersion ? ` (version ${setupVersion}).` : '.'));
             core.endGroup();
         }
+        if (buildSetup) prepareNsisCompression(buildDir);
         if (buildSetup && localSource) {
             core.info('Skipping the online installer: without a git repository it has nothing to download.');
         } else if (buildSetup) {
@@ -335,6 +361,12 @@ async function run() {
             if (fs.existsSync(generatedDataPath)) {
                 const removed = removePycache(generatedDataPath);
                 core.info(`Removed ${removed} __pycache__ folders from ${generatedDataPath}`);
+            }
+            const bundledPythonPath = path.join(generatedDataPath, 'apps', appName, 'python');
+            if (stripPythonInput && fs.existsSync(bundledPythonPath)) {
+                const stripped = stripPython(bundledPythonPath);
+                core.info(`Stripped ${stripped.dirs} test and unused stdlib folders from ${bundledPythonPath}: ` +
+                    `${(stripped.bytes / 1024 ** 2).toFixed(1)} MB.`);
             }
             const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
             if (localSource) await detachLocalSource(generatedDataPath, appName, bundledRepoPath);
@@ -390,14 +422,16 @@ async function run() {
                     });
                 }
                 const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
-                // Archives run the app from working, so a local snapshot's repo stays out of them.
+                // Archives run the app from working, a checkout that does not need repo (git data
+                // only). Only the updater reads repo, so archives without it leave repo out.
                 // Next to the app folder, so the move is a rename on the same drive (a temp dir on
                 // another drive fails with EXDEV), yet outside what the archive packs.
                 const stashedRepoPath = path.join(distDir, `.repo_stash_${appName}`);
-                const stashRepo = localSource && fs.existsSync(bundledRepoPath);
+                const stashRepo = !withUpdater && fs.existsSync(bundledRepoPath);
                 if (stashRepo) {
                     await removeIfExists(stashedRepoPath);
                     await io.mv(bundledRepoPath, stashedRepoPath);
+                    core.info('Leaving the app repository out of the archive: it has no updater to use it.');
                 }
                 try {
                     if (packageFormat === '7z') {

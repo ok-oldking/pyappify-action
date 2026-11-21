@@ -34,8 +34,35 @@ function prepareTauriConfig(contents, appName, version) {
     config = replaceExactStringValues(config, 'pyappify', appName);
     config = replaceExactStringValues(config, '0.0.1', version.replace(/^v/, ''));
     config.mainBinaryName = getMainBinaryName(appName);
+    // Solid LZMA is Tauri's default; set it so the dictionary size below always applies.
+    config.bundle = config.bundle || {};
+    config.bundle.windows = config.bundle.windows || {};
+    config.bundle.windows.nsis = { ...config.bundle.windows.nsis, compression: 'lzma' };
 
     return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+// NSIS compresses with an 8 MB LZMA dictionary by default, too small to find the
+// repeats across a Python install. 64 MB shrinks offline installers for about 700 MB
+// of RAM while building and 64 MB while installing.
+const NSIS_DICT_SIZE_MB = 64;
+const NSIS_SET_COMPRESSOR = /^([ \t]*)SetCompressor \/SOLID "\{\{compression\}\}"[ \t]*$/m;
+
+// Returns the installer template with the dictionary size set, or null when the
+// template has no SetCompressor line to add it after.
+function prepareNsisTemplate(contents) {
+    if (contents.includes('SetCompressorDictSize')) return contents;
+    const match = contents.match(NSIS_SET_COMPRESSOR);
+    if (!match) return null;
+    const eol = contents.includes('\r\n') ? '\r\n' : '\n';
+    const indent = match[1];
+    const lines = [
+        `${indent}!if "{{compression}}" == "lzma"`,
+        `${indent}  SetCompressorDictSize ${NSIS_DICT_SIZE_MB}`,
+        `${indent}!endif`,
+    ];
+    const end = match.index + match[0].length;
+    return contents.slice(0, end) + eol + lines.join(eol) + contents.slice(end);
 }
 
 function getInstallerFileName(baseName, version) {
@@ -48,6 +75,8 @@ function getInstallerFileName(baseName, version) {
 module.exports = {
     getInstallerFileName,
     getMainBinaryName,
+    NSIS_DICT_SIZE_MB,
+    prepareNsisTemplate,
     prepareTauriConfig,
 };
 
@@ -62171,6 +62200,59 @@ function removePycache(dir) {
     return removed;
 }
 
+// Stdlib folders an app never imports: the IDLE editor and the turtle demos.
+const UNUSED_STDLIB_DIRS = ['idlelib', 'turtledemo'];
+const TEST_DIR_NAMES = new Set(['test', 'tests']);
+const TEST_FILE = /^(test_.*|.*_test|conftest)\.py$/i;
+
+function dirSize(dir) {
+    let bytes = 0;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        bytes += entry.isDirectory() ? dirSize(full) : fs.lstatSync(full).size;
+    }
+    return bytes;
+}
+
+// A test or tests folder holding test modules, like the stdlib's test package or
+// numpy/_core/tests. A folder of that name without test modules may be app data.
+function isTestSuite(dir) {
+    return fs.readdirSync(dir, { withFileTypes: true }).some(entry => entry.isFile() && TEST_FILE.test(entry.name));
+}
+
+function removeTestSuites(dir, result) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const full = path.join(dir, entry.name);
+        if (TEST_DIR_NAMES.has(entry.name.toLowerCase()) && isTestSuite(full)) {
+            result.bytes += dirSize(full);
+            result.dirs++;
+            fs.rmSync(full, { recursive: true, force: true });
+        } else {
+            removeTestSuites(full, result);
+        }
+    }
+}
+
+// Removes what a packaged app does not run from its Python install (pythonDir is
+// apps/<name>/python): test suites in the stdlib and site-packages, idlelib and
+// turtledemo. pip, setuptools, ensurepip, headers and *.dist-info stay, so updates
+// can still install packages. Returns the folders removed and their size.
+function stripPython(pythonDir) {
+    const result = { dirs: 0, bytes: 0 };
+    const libDir = path.join(pythonDir, 'Lib');
+    if (!fs.existsSync(libDir)) return result;
+    for (const name of UNUSED_STDLIB_DIRS) {
+        const full = path.join(libDir, name);
+        if (!fs.existsSync(full)) continue;
+        result.bytes += dirSize(full);
+        result.dirs++;
+        fs.rmSync(full, { recursive: true, force: true });
+    }
+    removeTestSuites(libDir, result);
+    return result;
+}
+
 // Mirrors pyappify's find_script_or_executable: working dir first, then python/Scripts (with extensions).
 // Returns a path relative to the package root (the folder containing the .cmd), using backslashes.
 function resolveMainScript(dataDir, appName, mainScript) {
@@ -62365,6 +62447,7 @@ module.exports = {
     removePycache,
     readPreparedAppVersion,
     resolveMainScript,
+    stripPython,
 };
 
 
@@ -73010,7 +73093,7 @@ const yaml = __nccwpck_require__(4281);
 const fs = __nccwpck_require__(9896);
 const path = __nccwpck_require__(6928);
 const archiver = __nccwpck_require__(9392);
-const { getInstallerFileName, getMainBinaryName, prepareTauriConfig } = __nccwpck_require__(7299);
+const { NSIS_DICT_SIZE_MB, getInstallerFileName, getMainBinaryName, prepareNsisTemplate, prepareTauriConfig } = __nccwpck_require__(7299);
 const { getSetupVersion, setupProfile, withPersistentCache } = __nccwpck_require__(453);
 const { getKeepReleases, trimRepo } = __nccwpck_require__(9631);
 const { getExtraFiles, placeExtraFiles } = __nccwpck_require__(3008);
@@ -73031,6 +73114,7 @@ const {
     readPreparedAppVersion,
     removePycache,
     resolveMainScript,
+    stripPython,
 } = __nccwpck_require__(4250);
 
 async function find7z() {
@@ -73092,6 +73176,29 @@ async function removeIfExists(directoryPath) {
         await io.rmRF(directoryPath);
         core.info(`Removed dir if exists: ${directoryPath}`);
     }
+}
+
+// Sets the LZMA dictionary size in the launcher's NSIS template before bundling. Runs on
+// every build, so a launcher reused from an earlier build gets it too.
+function prepareNsisCompression(buildDir) {
+    const srcTauri = path.join(buildDir, 'src-tauri');
+    const tauriConfPath = path.join(srcTauri, 'tauri.conf.json');
+    if (!fs.existsSync(tauriConfPath)) return;
+    const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, 'utf8'));
+    const nsis = (tauriConf.bundle && tauriConf.bundle.windows && tauriConf.bundle.windows.nsis) || {};
+    if (!nsis.template) {
+        core.info("The launcher uses Tauri's built-in NSIS template; keeping its default LZMA dictionary.");
+        return;
+    }
+    const templatePath = path.join(srcTauri, nsis.template);
+    const template = fs.readFileSync(templatePath, 'utf8');
+    const prepared = prepareNsisTemplate(template);
+    if (prepared === null) {
+        core.warning(`No SetCompressor line in ${templatePath}; installers keep NSIS's default 8 MB LZMA dictionary.`);
+        return;
+    }
+    if (prepared !== template) fs.writeFileSync(templatePath, prepared);
+    core.info(`NSIS installers use a ${NSIS_DICT_SIZE_MB} MB LZMA dictionary.`);
 }
 
 function allowPnpmBuildScripts(packageJsonPath) {
@@ -73161,6 +73268,7 @@ async function run() {
         const packageFormat = getPackageFormat(core.getInput('package_zip_format'));
         const packageZipUpdater = core.getBooleanInput('package_zip_updater');
         const useGitUrl = core.getBooleanInput('use_git_url');
+        const stripPythonInput = core.getBooleanInput('strip_python');
         if (!buildExeOnly && !buildSetup && !packageZip) {
             throw new Error('At least one of build_setup or package_zip must be true.');
         }
@@ -73299,6 +73407,7 @@ async function run() {
                 (setupVersion ? ` (version ${setupVersion}).` : '.'));
             core.endGroup();
         }
+        if (buildSetup) prepareNsisCompression(buildDir);
         if (buildSetup && localSource) {
             core.info('Skipping the online installer: without a git repository it has nothing to download.');
         } else if (buildSetup) {
@@ -73338,6 +73447,12 @@ async function run() {
             if (fs.existsSync(generatedDataPath)) {
                 const removed = removePycache(generatedDataPath);
                 core.info(`Removed ${removed} __pycache__ folders from ${generatedDataPath}`);
+            }
+            const bundledPythonPath = path.join(generatedDataPath, 'apps', appName, 'python');
+            if (stripPythonInput && fs.existsSync(bundledPythonPath)) {
+                const stripped = stripPython(bundledPythonPath);
+                core.info(`Stripped ${stripped.dirs} test and unused stdlib folders from ${bundledPythonPath}: ` +
+                    `${(stripped.bytes / 1024 ** 2).toFixed(1)} MB.`);
             }
             const bundledRepoPath = path.join(generatedDataPath, 'apps', appName, 'repo');
             if (localSource) await detachLocalSource(generatedDataPath, appName, bundledRepoPath);
@@ -73393,14 +73508,16 @@ async function run() {
                     });
                 }
                 const packagePath = path.join(distDir, getZipPackageFileName(appName, platform, profile.name, appVersion, packageFormat));
-                // Archives run the app from working, so a local snapshot's repo stays out of them.
+                // Archives run the app from working, a checkout that does not need repo (git data
+                // only). Only the updater reads repo, so archives without it leave repo out.
                 // Next to the app folder, so the move is a rename on the same drive (a temp dir on
                 // another drive fails with EXDEV), yet outside what the archive packs.
                 const stashedRepoPath = path.join(distDir, `.repo_stash_${appName}`);
-                const stashRepo = localSource && fs.existsSync(bundledRepoPath);
+                const stashRepo = !withUpdater && fs.existsSync(bundledRepoPath);
                 if (stashRepo) {
                     await removeIfExists(stashedRepoPath);
                     await io.mv(bundledRepoPath, stashedRepoPath);
+                    core.info('Leaving the app repository out of the archive: it has no updater to use it.');
                 }
                 try {
                     if (packageFormat === '7z') {

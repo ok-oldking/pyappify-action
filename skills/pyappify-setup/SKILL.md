@@ -163,7 +163,8 @@ The same inputs drive the GitHub workflow (`with:` entries) and the local build
 |---|---|---|
 | `build_setup` | `true` | Build the online setup exe and one offline setup exe per profile. Without a git repo there is no online setup. |
 | `package_zip` | `false` | Also build a portable archive per profile: app-name folder with the prepared `data` (Python + venv + app) and `<name>.cmd` launcher. Honors `admin` and `use_pythonw`. |
-| `package_zip_updater` | `true` | Add `<name>-updater.cmd` to each archive: opens the pyappify Tk update window (version list with notes, pip mirror, update, restart via `<name>.cmd`). Needs `pyappify[standalone]>=1.0.20` (Python 3.10+) in the app's requirements; skipped with a warning otherwise. Never added when packaging local files. |
+| `package_zip_updater` | `true` | Add `<name>-updater.cmd` to each archive: opens the pyappify Tk update window (version list with notes, pip mirror, update, restart via `<name>.cmd`). Needs `pyappify[standalone]>=1.0.20` (Python 3.10+) in the app's requirements; skipped with a warning otherwise. Never added when packaging local files. Archives without it also leave out the app's git repo. |
+| `strip_python` | `true` | Remove `test`/`tests` folders holding `test_*.py` files (stdlib and site-packages), `idlelib` and `turtledemo` from the bundled Python. Set `false` only if the app imports a package's tests. |
 | `package_zip_format` | `7z` | `7z` (much smaller; opens natively on Windows 11 23H2+, otherwise needs 7-Zip; a local build needs 7-Zip installed) or `zip`. |
 | `add_version_name` | `false` | Append the tag version (name prefix and leading `v` removed) to installer/archive names; the short commit hash when there is no version tag. |
 | `version` | latest | Pin a PyAppify launcher tag, e.g. `v1.2.6`, from https://github.com/ok-oldking/pyappify/tags. Must be v1.2.4+, and newer than v1.2.7 when packaging local files. Recommended for reproducible builds. |

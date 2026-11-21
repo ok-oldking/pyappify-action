@@ -141,6 +141,7 @@ All inputs are optional.
 | `build_setup` | `true` | Build the online installer and one offline installer per profile. |
 | `package_zip` | `false` | Build a portable archive per profile. Its `.cmd` honors `admin`, `use_pythonw` and `PYTHONPATH`. |
 | `package_zip_updater` | `true` | Add `<name>-updater.cmd` to each archive. Skipped with a warning unless the app depends on `pyappify[standalone]` 1.0.20+. |
+| `strip_python` | `true` | Remove what the app does not run from the bundled Python to make installers and archives smaller: `test`/`tests` folders holding `test_*.py` files (stdlib and site-packages), `idlelib` and `turtledemo`. pip, setuptools, `ensurepip` and headers stay, so updates still work. Set `false` if the app imports a package's tests. |
 | `package_zip_format` | `7z` | `7z`: solid LZMA2, about a third smaller than zip. It opens natively on Windows 11 23H2+, otherwise needs 7-Zip. Or `zip`. |
 | `add_version_name` | `false` | Append the app version to installer and archive names: the tag version without its name prefix and `v` (`release-v1.2.0` gives `1.2.0`). Without a workflow tag it is the newest version tag reachable from the checkout, else the checkout's short commit hash, with a warning. |
 | `use_git_url` | `true` | `false` packages the app's local files instead of cloning `git_url`. See [packaging without a git repo](#packaging-without-a-git-repo). |
@@ -188,7 +189,7 @@ Portable archives have no launcher, so updates use the update window from the [`
 pyappify[standalone]>=1.0.20
 ```
 
-Each archive then also gets `my-app-updater.cmd`. It opens a window where users pick a version (releases, or pre-releases with "All") and read its notes. They can also choose the pip mirror. The window then checks the version out into the bundled repo, installs its dependencies, and restarts the app through `my-app.cmd`. The extra requires Python 3.10+ (for Dulwich). Without it the action builds the archive without the updater cmd and logs a warning. Set `package_zip_updater: false` to leave it out.
+Each archive then also gets `my-app-updater.cmd`. It opens a window where users pick a version (releases, or pre-releases with "All") and read its notes. They can also choose the pip mirror. The window then checks the version out into the bundled repo, installs its dependencies, and restarts the app through `my-app.cmd`. The extra requires Python 3.10+ (for Dulwich). Without it the action builds the archive without the updater cmd and logs a warning. Set `package_zip_updater: false` to leave it out. Archives without the updater cmd also leave out the app's git repo (`data/apps/<name>/repo`), which only the updater reads. The app runs from its checked-out files in `working`.
 
 When the updater cmd is included, `my-app.cmd` no longer hardcodes the packaged version. `pyappify.app_version` is read from the repo instead, so it stays correct after an update.
 
@@ -257,8 +258,8 @@ Differences from a workflow run:
 1. Clones [PyAppify](https://github.com/ok-oldking/pyappify) at the requested `version`. It then copies in your `pyappify.yml` and `icons/` and renames the project to your app name.
 2. Compiles the launcher with Tauri/Rust.
 3. For each profile, runs the launcher's headless setup at the exact tag being released. This clones your repo, downloads Python, creates the venv and installs your requirements. The action then checks that the prepared version matches the tag.
-4. Removes `__pycache__` folders, so the app's first start is a little slower. Trims the git history to `keep_releases` if set.
-5. Bundles the prepared profile into an NSIS installer and/or a portable archive, then writes everything to `pyappify_dist/`.
+4. Removes `__pycache__` folders, so the app's first start is a little slower. With `strip_python`, removes test suites, `idlelib` and `turtledemo` from the bundled Python. Trims the git history to `keep_releases` if set.
+5. Bundles the prepared profile into an NSIS installer (solid LZMA with a 64 MB dictionary) and/or a portable archive, then writes everything to `pyappify_dist/`. Archives leave out the app's git repo unless they have the updater cmd.
 
 ## License
 
